@@ -1,6 +1,7 @@
 import customtkinter as ctk
 from app.config import settings
 
+
 class PanelControls(ctk.CTkFrame):
     def __init__(self, master, image_logo, icon_off, cmd_login, cmd_wizard, cmd_sugo, cmd_exit):
         super().__init__(master, fg_color=settings.COLOR_WHITE, corner_radius=15, border_width=0)
@@ -27,7 +28,7 @@ class PanelControls(ctk.CTkFrame):
         self.lbl_sub.pack(pady=(0, 5), padx=35, anchor="w")
 
         self.linea_cian_izq = ctk.CTkFrame(self, width=35, height=3, fg_color=settings.COLOR_CYAN, corner_radius=2)
-        self.linea_cian_izq.pack(pady=(5, 30), padx=35, anchor="w")
+        self.linea_cian_izq.pack(pady=(5, 20), padx=35, anchor="w")
 
         # Botones de Acción usando los Callbacks recibidos por parámetro
         self.btn_1 = self.crear_boton("    1. Iniciar Sesión                                    >", cmd_login)
@@ -40,7 +41,49 @@ class PanelControls(ctk.CTkFrame):
         self.btn_3.pack(pady=8, padx=35, fill="x")
 
         self.btn_exit = self.crear_boton_con_imagen("4. Salir", icon_off, cmd_exit, white=True)
-        self.btn_exit.pack(pady=(20, 10), padx=35, fill="x")
+        self.btn_exit.pack(pady=(12, 8), padx=35, fill="x")
+
+        # ==========================================
+        # --- OPCIÓN MODO OCULTO (HEADLESS RPA) ---
+        # ==========================================
+        self.frame_headless = ctk.CTkFrame(
+            self,
+            fg_color="#F0F4FF",
+            corner_radius=10,
+            border_width=1,
+            border_color="#C5CCE8"
+        )
+        self.frame_headless.pack(fill="x", padx=35, pady=(4, 8))
+
+        ctk.CTkLabel(
+            self.frame_headless,
+            text="🖥️  Modo Oculto (RPA)",
+            font=ctk.CTkFont(size=13, weight="bold"),
+            text_color=settings.COLOR_ELECTRIC
+        ).pack(side="left", padx=(14, 6), pady=10)
+
+        self._var_headless = ctk.BooleanVar(value=False)
+        self.switch_headless = ctk.CTkSwitch(
+            self.frame_headless,
+            text="",
+            variable=self._var_headless,
+            onvalue=True,
+            offvalue=False,
+            width=44,
+            progress_color=settings.COLOR_CYAN,
+            button_color=settings.COLOR_ELECTRIC,
+            button_hover_color=settings.COLOR_MIDNIGHT,
+            command=self._on_headless_toggle
+        )
+        self.switch_headless.pack(side="right", padx=(6, 14), pady=10)
+
+        self.lbl_headless_state = ctk.CTkLabel(
+            self.frame_headless,
+            text="Desactivado",
+            font=ctk.CTkFont(size=11),
+            text_color=settings.COLOR_TEXT_MUTED
+        )
+        self.lbl_headless_state.pack(side="right", padx=(0, 4), pady=10)
 
         # Espaciador para empujar el estado al fondo
         ctk.CTkFrame(self, fg_color="transparent").pack(expand=True, fill="both")
@@ -62,6 +105,30 @@ class PanelControls(ctk.CTkFrame):
             text_color=settings.COLOR_GREEN, font=ctk.CTkFont(size=14, weight="bold")
         )
         self.lbl_status.pack(side="left", pady=10)
+
+    # ==========================================
+    # TOGGLE HEADLESS
+    # ==========================================
+    def _on_headless_toggle(self):
+        activo = self._var_headless.get()
+        if activo:
+            self.lbl_headless_state.configure(
+                text="Activado", text_color=settings.COLOR_ELECTRIC
+            )
+            self.frame_headless.configure(
+                fg_color="#DDE6FF", border_color=settings.COLOR_ELECTRIC
+            )
+        else:
+            self.lbl_headless_state.configure(
+                text="Desactivado", text_color=settings.COLOR_TEXT_MUTED
+            )
+            self.frame_headless.configure(
+                fg_color="#F0F4FF", border_color="#C5CCE8"
+            )
+
+    def get_modo_oculto(self) -> bool:
+        """Devuelve True si el RPA debe ejecutarse en modo headless (sin ventana)."""
+        return self._var_headless.get()
 
     # ==========================================
     # UTILIDADES TRASLADADAS A ESTA CLASE
@@ -107,3 +174,4 @@ class PanelControls(ctk.CTkFrame):
         self.btn_2.configure(state=estado)
         self.btn_3.configure(state=estado)
         self.btn_exit.configure(state=estado)
+        self.switch_headless.configure(state=estado)

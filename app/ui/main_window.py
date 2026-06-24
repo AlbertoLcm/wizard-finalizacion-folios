@@ -1,5 +1,4 @@
 import asyncio
-import datetime
 import threading
 
 from PIL import Image
@@ -10,8 +9,7 @@ from app.core.bots import autenticar_google, orchestrator
 
 from app.ui.panel_logs import PanelLogs
 from app.ui.panel_controls import PanelControls
-
-import time
+from app.ui.dialog_login import DialogLogin
 
 
 class BotWizardApp(ctk.CTk):
@@ -102,18 +100,100 @@ class BotWizardApp(ctk.CTk):
         self.panel_logs.agregar_log("Sistema Bot Wizard iniciado correctamente.", success=True)
 
     # ==========================================
-    # EVENTOS DE LOS BOTONES (Actualizados)
+    # HELPERS INTERNOS
     # ==========================================
+
+    def _log(self, msg, **kwargs):
+        """Envía un mensaje al panel de logs de forma thread-safe."""
+        self.after(0, lambda: self.panel_logs.agregar_log(msg, **kwargs))
+
+    def _set_ui_bloqueada(self, bloqueada: bool):
+        """Bloquea o desbloquea la UI (thread-safe)."""
+        self.after(0, lambda: self.panel_izq.bloquear_ui(bloqueada))
+
+    def _set_estado(self, msg, color=settings.COLOR_GREEN, is_processing=False):
+        """Actualiza el estado inferior (thread-safe)."""
+        self.after(0, lambda: self.panel_izq.cambiar_estado(msg, color=color, is_processing=is_processing))
+
+    def _on_proceso_terminado(self):
+        """Callback llamado desde el hilo del bot cuando termina (éxito o error)."""
+        self._set_ui_bloqueada(False)
+        self._set_estado("Listo", color=settings.COLOR_GREEN, is_processing=False)
+
+    def _ejecutar_en_hilo(self, coro):
+        """Lanza una coroutine asyncio en un hilo de fondo sin bloquear la UI."""
+        def _runner():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(coro)
+            finally:
+                loop.close()
+
+        hilo = threading.Thread(target=_runner, daemon=True)
+        hilo.start()
+
+    # ==========================================
+    # EVENTOS DE LOS BOTONES
+    # ==========================================
+
     def cmd_login(self):
-        self.panel_logs.agregar_log("Iniciando Login...", success=True)
-        # TODO: Agregar lógica de autenticación aquí
+        """Botón 1 — Iniciar Sesión Google Drive (persistente)."""
+        self._log("Iniciando proceso de autenticación Google Drive...")
+        self._set_estado("Autenticando Google...", color=settings.COLOR_CYAN, is_processing=True)
+        self._set_ui_bloqueada(True)
+
+        async def _tarea():
+            try:
+                await autenticar_google(log_callback=self._log)
+                self._log("Sesión de Google Drive guardada correctamente.", success=True)
+            except Exception as e:
+                self._log(f"Error durante la autenticación: {e}", error=True)
+            finally:
+                self._on_proceso_terminado()
+
+        self._ejecutar_en_hilo(_tarea())
 
     def cmd_wizard(self):
-        self.panel_logs.agregar_log("Ejecutando Cierre Folio Wizard...")
-        self.panel_izq.cambiar_estado("Ejecutando Wizard...", is_processing=True)
-        # TODO: Agregar lógica de orchestrator aquí
+        """Botón 2 — Cierre Folio Wizard."""
+        modo_oculto = self.panel_izq.get_modo_oculto()
+        modo_txt = "oculto (headless)" if modo_oculto else "visible"
+        self._log(f"Iniciando Cierre Folio Wizard en modo {modo_txt}...")
+        self._set_estado("Ejecutando Wizard...", color=settings.COLOR_CYAN, is_processing=True)
+        self._set_ui_bloqueada(True)
+
+        coro = orchestrator(
+            tipo_tarea="wizard",
+            modo_oculto=modo_oculto,
+            log_callback=self._log,
+            done_callback=self._on_proceso_terminado,
+        )
+        self._ejecutar_en_hilo(coro)
 
     def cmd_sugo(self):
-        self.panel_logs.agregar_log("Adjuntando Informe SUGO...")
-        self.panel_izq.cambiar_estado("Adjuntando informe...", is_processing=True)
-        # TODO: Agregar lógica del informe SUGO aquí
+        """Botón 3 — Adjuntar Informe SUGO (pide credenciales primero)."""
+        self._log("Preparando proceso SUGO. Solicitando credenciales...")
+        self._set_estado("Esperando credenciales...", color=settings.COLOR_CYAN, is_processing=True)
+        self._set_ui_bloqueada(True)
+
+        def _on_credenciales_ok(user: str, password: str):
+            modo_oculto = self.panel_izq.get_modo_oculto()
+            modo_txt = "oculto (headless)" if modo_oculto else "visible"
+            self._log(f"Credenciales recibidas. Iniciando SUGO en modo {modo_txt}...")
+            self._set_estado("Adjuntando informe SUGO...", color=settings.COLOR_CYAN, is_processing=True)
+
+            coro = orchestrator(
+                tipo_tarea="sugo",
+                modo_oculto=modo_oculto,
+                log_callback=self._log,
+                done_callback=self._on_proceso_terminado,
+                user=user,
+                password=password,
+            )
+            self._ejecutar_en_hilo(coro)
+
+        def _on_cancelado():
+            self._log("Proceso SUGO cancelado por el usuario.", warning=True)
+            self._on_proceso_terminado()
+
+        DialogLogin(self, callback_ok=_on_credenciales_ok, callback_cancel=_on_cancelado)

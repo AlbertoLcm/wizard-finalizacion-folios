@@ -2,6 +2,7 @@ import datetime
 import customtkinter as ctk
 from app.config import settings
 
+
 class PanelLogs(ctk.CTkFrame):
     def __init__(self, master, icon_trash):
         # Inicializamos el Frame con los colores de settings
@@ -44,16 +45,22 @@ class PanelLogs(ctk.CTkFrame):
         # Configuración de colores en el texto (Tags)
         self.txt_logs.tag_config("cyan_dot", foreground=settings.COLOR_CYAN)
         self.txt_logs.tag_config("success", foreground=settings.COLOR_GREEN)
+        self.txt_logs.tag_config("error", foreground="#FF6B6B")
+        self.txt_logs.tag_config("warning", foreground="#FFA552")
         self.txt_logs.tag_config("timestamp", foreground="#7A8599")
         self.txt_logs.configure(state="disabled")
 
     # --- Métodos propios del panel ---
-    def agregar_log(self, texto, success=False):
+    def agregar_log(self, texto, success=False, error=False, warning=False):
         hora = datetime.datetime.now().strftime("%H:%M:%S")
         self.txt_logs.configure(state="normal")
         
         if success:
             self.txt_logs.insert("end", "  ✓ ", "success")
+        elif error:
+            self.txt_logs.insert("end", "  ✗ ", "error")
+        elif warning:
+            self.txt_logs.insert("end", "  ⚠ ", "warning")
         else:
             self.txt_logs.insert("end", "  ● ", "cyan_dot")
             
@@ -61,6 +68,10 @@ class PanelLogs(ctk.CTkFrame):
         
         if success:
             self.txt_logs.insert("end", f"{texto}\n", "success")
+        elif error:
+            self.txt_logs.insert("end", f"{texto}\n", "error")
+        elif warning:
+            self.txt_logs.insert("end", f"{texto}\n", "warning")
         else:
             self.txt_logs.insert("end", f"{texto}\n")
             

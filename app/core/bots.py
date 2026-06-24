@@ -1,9 +1,9 @@
 import asyncio
 from app.config import settings
 import os
+from pathlib import Path
 import pandas as pd
-import getpass
-from tqdm import tqdm
+from typing import Callable, Optional
 from playwright.async_api import async_playwright, Page, TimeoutError as PlaywrightTimeoutError
 
 
@@ -16,8 +16,14 @@ def obtener_argumentos_navegador():
     ]
 
 
-async def autenticar_google():
-    print(f"\n--- FASE DE AUTENTICACIÓN (Carpeta: {settings.USER_DATA_DIR}) ---")
+async def autenticar_google(log_callback: Optional[Callable] = None):
+    def _log(msg, **kw):
+        if log_callback:
+            log_callback(msg, **kw)
+        else:
+            print(msg)
+
+    _log(f"Iniciando autenticación Google (perfil: {settings.USER_DATA_DIR})...")
     async with async_playwright() as p:
         context = await p.chromium.launch_persistent_context(
             user_data_dir=settings.USER_DATA_DIR,
@@ -27,46 +33,61 @@ async def autenticar_google():
         )
         page = context.pages[0] if context.pages else await context.new_page()
         await page.goto("https://drive.google.com")
-        print("Inicia sesión. Cierra el navegador")
+        _log("Navegador abierto. Inicia sesión y cierra la ventana del navegador cuando termines.", success=True)
         await page.wait_for_event("close", timeout=120_000)
 
 
 def preparar_entorno():
-    """Crea carpetas necesarias si no existen."""
-    for carpeta in [settings.BASE_DIR, settings.DOCUMENTS_UPLOAD]:
-        if not os.path.exists(carpeta):
-            os.makedirs(carpeta)
-            print(f"Carpeta creada: {carpeta}")
+    """Crea la carpeta dist/ y sus subcarpetas necesarias si no existen."""
+    carpetas = [
+        settings.DIST_DIR,
+        settings.DOCUMENTS_UPLOAD,
+        settings.USER_DATA_DIR,
+    ]
+    for carpeta in carpetas:
+        Path(carpeta).mkdir(parents=True, exist_ok=True)
 
 
-def cargar_datos(columnas_requeridas, columna_status):
+def cargar_datos(columnas_requeridas, columna_status, log_callback: Optional[Callable] = None):
     """Carga el progreso o el archivo inicial de forma genérica."""
+    def _log(msg, **kw):
+        if log_callback:
+            log_callback(msg, **kw)
+        else:
+            print(msg)
+
     if os.path.exists(settings.FILE_EXITOS):
-        opcion = input(f"Se encontró progreso previo en {settings.FILE_EXITOS}. ¿Continuar? (si/no): ").lower()
-        if opcion == 'si':
-            df = pd.read_csv(settings.FILE_EXITOS)
-            if set(columnas_requeridas).issubset(df.columns):
-                return df
-            print("[ERROR] El Excel no tiene las columnas necesarias. Cargando original...")
+        _log(f"Progreso previo encontrado. Continuando desde {settings.FILE_EXITOS}...", success=True)
+        df = pd.read_csv(settings.FILE_EXITOS)
+        if set(columnas_requeridas).issubset(df.columns):
+            return df
+        _log("El archivo de progreso no tiene las columnas necesarias. Cargando original...", warning=True)
 
     if not os.path.exists(settings.INPUT_FILE):
-        print(f"[ERROR] No existe {settings.INPUT_FILE}")
+        _log(f"No se encontró el archivo de entrada: {settings.INPUT_FILE}", error=True)
         return None
 
     df = pd.read_excel(settings.INPUT_FILE)
     if not set(columnas_requeridas).issubset(df.columns):
-        print(f"[ERROR] El Excel debe contener las columnas: {', '.join(columnas_requeridas)}")
+        _log(f"El Excel debe contener las columnas: {', '.join(columnas_requeridas)}", error=True)
         return None
     df[columna_status] = "Pendiente"
 
     return df
 
 
-async def manejar_login_intranet(browser, user, password):
+async def manejar_login_intranet(browser, user, password, log_callback: Optional[Callable] = None):
     """Encapsula la lógica de autenticación en SUGO/Intranet."""
+    def _log(msg, **kw):
+        if log_callback:
+            log_callback(msg, **kw)
+        else:
+            print(msg)
+
     context = await browser.new_context(ignore_https_errors=True)
     page = await context.new_page()
     try:
+        _log(f"Conectando al portal de autenticación...")
         await page.goto(settings.URL_LOGIN, wait_until="domcontentloaded")
         await page.fill(".name", user)
         await page.fill(".pass", password)
@@ -78,14 +99,14 @@ async def manejar_login_intranet(browser, user, password):
             else:
                 await page.keyboard.press("Enter")
         
-        print(f"Usuario {user} autenticado con éxito.")
+        _log(f"Usuario '{user}' autenticado con éxito en Intranet.", success=True)
         popup = await page_info.value
         await popup.wait_for_load_state()
         storage = await context.storage_state()
         await context.close()
         return storage
     except Exception as e:
-        print(f"[ERROR] en login: {e}")
+        _log(f"Error durante el login en Intranet: {e}", error=True)
         return None
     
 
@@ -132,7 +153,7 @@ async def cierre_operaciones_asig_juridico(datos: dict, page: Page):
         pagina_upload = await upload_popup_info.value
         await pagina_upload.wait_for_load_state("domcontentloaded")
 
-        ruta_archivo_acuse = os.path.abspath(os.path.join(settings.DOCUMENTS_UPLOAD, archivo))
+        ruta_archivo_acuse = Path(settings.DOCUMENTS_UPLOAD) / archivo
         input_file0 = pagina_upload.locator("#file0")
         await input_file0.set_input_files(ruta_archivo_acuse)
 
@@ -283,69 +304,128 @@ async def finalizacion_wizard(datos: dict, page: Page):
         return "Error"
 
 
-async def orchestrator(tipo_tarea: str, modo_oculto: bool):
-    """Orquestador único para evitar repetir bucles de ejecución."""
-    preparar_entorno()
-    
-    col_status = "Status Asignacion" if tipo_tarea == "wizard" else "Status SUGO"
-    cols_necesarias = ["Folio Sugo", "Folio Wizard", "Tipo Respuesta", "Selfservice", "Dictamen Wizard", "Informe"]
-    
-    df = cargar_datos(cols_necesarias, col_status)
-    if df is None: return
+async def orchestrator(
+    tipo_tarea: str,
+    modo_oculto: bool,
+    log_callback: Optional[Callable] = None,
+    done_callback: Optional[Callable] = None,
+    user: Optional[str] = None,
+    password: Optional[str] = None,
+):
+    """
+    Orquestador único para ambas tareas RPA.
 
-    async with async_playwright() as p:
-        # Selección de contexto según la tarea
-        if tipo_tarea == "wizard":
-            context = await p.chromium.launch_persistent_context(
-                user_data_dir=settings.USER_DATA_DIR,
-                channel="chrome",
-                headless=modo_oculto,
-                accept_downloads=True,
-                args=[
-                    "--disable-blink-features=AutomationControlled",
-                    "--disable-gpu",
-                    "--no-sandbox",
-                    "--window-size=1920,1080"
-                ]
-            )
+    Args:
+        tipo_tarea:    'wizard' | 'sugo'
+        modo_oculto:   True = headless (sin ventana de navegador)
+        log_callback:  función(msg, *, success, error, warning) para enviar logs a la UI
+        done_callback: función() llamada al finalizar (exitoso o con error)
+        user:          usuario de Intranet (solo para tipo_tarea='sugo')
+        password:      contraseña de Intranet (solo para tipo_tarea='sugo')
+    """
+    def _log(msg, **kw):
+        if log_callback:
+            log_callback(msg, **kw)
         else:
-            user = input("Usuario: ")
-            password = getpass.getpass("Contraseña: ")
-            browser = await p.chromium.launch(
-                headless=modo_oculto,
-                channel="chrome",
-                args=["--disable-gpu", "--no-sandbox", "--window-size=1920,1080"]
-            )
-            storage = await manejar_login_intranet(browser, user, password)
-            if not storage: return
-            context = await browser.new_context(storage_state=storage)
+            print(msg)
 
-        try:
-            page = context.pages[0] if context.pages else await context.new_page()
-            
-            pendientes = df[df[col_status] == "Pendiente"].index.tolist()
-            pbar = tqdm(total=len(pendientes), desc=f"Procesando {tipo_tarea}")
+    try:
+        preparar_entorno()
 
-            for i, idx in enumerate(pendientes):
-                datos = df.loc[idx].to_dict()
-                
-                if tipo_tarea == "wizard":
-                    resultado = await finalizacion_wizard(datos, page)
-                else:
-                    resultado = await cierre_operaciones_asig_juridico(datos, page)
-                    resultado = resultado.get("status", "Error")
+        col_status = "Status Asignacion" if tipo_tarea == "wizard" else "Status SUGO"
+        cols_necesarias = ["Folio Sugo", "Folio Wizard", "Tipo Respuesta", "Selfservice", "Dictamen Wizard", "Informe"]
 
-                df.at[idx, col_status] = resultado
-                
-                # Guardado incremental
-                if (i + 1) % settings.BATCH_GUARDADO == 0:
-                    df.to_csv(settings.FILE_EXITOS, index=False)
-                
-                pbar.update(1)
+        df = cargar_datos(cols_necesarias, col_status, log_callback)
+        if df is None:
+            _log("No se pudo cargar el archivo de datos. Proceso cancelado.", error=True)
+            return
 
-            df.to_csv(settings.FILE_EXITOS, index=False)
-            pbar.close()
-        finally:
-            await context.close()
-            if tipo_tarea != "wizard" and 'browser' in locals():
-                await browser.close()
+        pendientes = df[df[col_status] == "Pendiente"].index.tolist()
+        total = len(pendientes)
+        _log(f"Folios pendientes a procesar: {total}")
+
+        if total == 0:
+            _log("No hay folios pendientes. El proceso ha finalizado.", success=True)
+            return
+
+        async with async_playwright() as p:
+            # ── Preparar contexto de navegador según tipo de tarea ──
+            if tipo_tarea == "wizard":
+                _log(f"Iniciando navegador (modo_oculto={modo_oculto})...")
+                context = await p.chromium.launch_persistent_context(
+                    user_data_dir=settings.USER_DATA_DIR,
+                    channel="chrome",
+                    headless=modo_oculto,
+                    accept_downloads=True,
+                    args=[
+                        "--disable-blink-features=AutomationControlled",
+                        "--disable-gpu",
+                        "--no-sandbox",
+                        "--window-size=1920,1080"
+                    ]
+                )
+                browser = None
+            else:
+                if not user or not password:
+                    _log("Se requieren credenciales para ejecutar el proceso SUGO.", error=True)
+                    return
+                _log(f"Iniciando navegador para SUGO (modo_oculto={modo_oculto})...")
+                browser = await p.chromium.launch(
+                    headless=modo_oculto,
+                    channel="chrome",
+                    args=["--disable-gpu", "--no-sandbox", "--window-size=1920,1080"]
+                )
+                storage = await manejar_login_intranet(browser, user, password, log_callback)
+                if not storage:
+                    _log("Error de autenticación. No se puede continuar.", error=True)
+                    await browser.close()
+                    return
+                context = await browser.new_context(storage_state=storage)
+
+            try:
+                page = context.pages[0] if context.pages else await context.new_page()
+
+                for i, idx in enumerate(pendientes):
+                    datos = df.loc[idx].to_dict()
+                    folio = str(datos.get("Folio Sugo", datos.get("Folio Wizard", idx))).strip()
+                    _log(f"[{i+1}/{total}] Procesando folio: {folio}")
+
+                    if tipo_tarea == "wizard":
+                        resultado = await finalizacion_wizard(datos, page)
+                    else:
+                        resultado_dict = await cierre_operaciones_asig_juridico(datos, page)
+                        resultado = resultado_dict.get("status", "Error")
+                        motivo = resultado_dict.get("motivo", "")
+                        if resultado == "ERROR" and motivo:
+                            _log(f"  → Error en folio {folio}: {motivo}", error=True)
+
+                    df.at[idx, col_status] = resultado
+
+                    if resultado in ("Completado", "OK"):
+                        _log(f"  → Folio {folio}: {resultado}", success=True)
+                    elif resultado in ("Omitido INE", "No encontrado"):
+                        _log(f"  → Folio {folio}: {resultado}", warning=True)
+                    elif resultado == "Error":
+                        _log(f"  → Folio {folio}: Error inesperado", error=True)
+
+                    # Guardado incremental
+                    if (i + 1) % settings.BATCH_GUARDADO == 0:
+                        df.to_csv(settings.FILE_EXITOS, index=False)
+                        _log(f"  Progreso guardado ({i+1}/{total} procesados)")
+
+                df.to_csv(settings.FILE_EXITOS, index=False)
+                _log(f"Proceso finalizado. Resultados guardados en: {settings.FILE_EXITOS}", success=True)
+
+            finally:
+                await context.close()
+                if browser:
+                    try:
+                        await browser.close()
+                    except Exception:
+                        pass
+
+    except Exception as e:
+        _log(f"Error crítico en el proceso: {e}", error=True)
+    finally:
+        if done_callback:
+            done_callback()
