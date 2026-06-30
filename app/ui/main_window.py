@@ -288,6 +288,7 @@ class BotWizardApp(ctk.CTk):
         
         try:
             col_status = "Status Asignacion"
+            col_informe = "Status Informe"
             cols_necesarias = ["Folio Sugo", "Folio Wizard", "Tipo Respuesta", "Selfservice", "Dictamen Wizard", "Informe"]
             
             from pathlib import Path
@@ -298,7 +299,8 @@ class BotWizardApp(ctk.CTk):
             from app.core.bots import cargar_datos
             df = cargar_datos(
                 columnas_requeridas=cols_necesarias,
-                columna_status=col_status,
+                columna_status_asignacion=col_status,
+                columna_status_informe=col_informe,
                 excel_path=self.excel_path,
                 progreso_file=str(progreso_file),
                 log_callback=self._log

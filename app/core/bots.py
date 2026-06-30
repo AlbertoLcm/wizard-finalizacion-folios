@@ -48,7 +48,7 @@ def preparar_entorno():
         Path(carpeta).mkdir(parents=True, exist_ok=True)
 
 
-def cargar_datos(columnas_requeridas, columna_status, excel_path: Optional[str] = None, progreso_file: Optional[str] = None, log_callback: Optional[Callable] = None):
+def cargar_datos(columnas_requeridas, columna_status_asignacion, columna_status_informe, excel_path: Optional[str] = None, progreso_file: Optional[str] = None, log_callback: Optional[Callable] = None):
     """Carga el progreso o el archivo inicial de forma genérica."""
     def _log(msg, **kw):
         if log_callback:
@@ -80,7 +80,8 @@ def cargar_datos(columnas_requeridas, columna_status, excel_path: Optional[str] 
     if not set(columnas_requeridas).issubset(df.columns):
         _log(f"El Excel debe contener las columnas: {', '.join(columnas_requeridas)}", error=True)
         return None
-    df[columna_status] = "Pendiente"
+    df[columna_status_asignacion] = "Pendiente"
+    df[columna_status_informe] = "Pendiente"
 
     return df
 
@@ -96,26 +97,29 @@ async def manejar_login_intranet(browser, user, password, log_callback: Optional
     context = await browser.new_context(ignore_https_errors=True)
     page = await context.new_page()
     try:
-        _log(f"Conectando al portal de autenticación...")
         await page.goto(settings.URL_LOGIN, wait_until="domcontentloaded")
+        await asyncio.sleep(2)
         await page.fill(".name", user)
         await page.fill(".pass", password)
-        
+        await asyncio.sleep(1)
+
         async with context.expect_page() as page_info:
-            # Intento de login por click o enter
             if await page.locator("//p[@onclick='validaCampos()']").is_visible():
-                await page.evaluate("validaCampos()")
+                await page.evaluate("""() => validaCampos()""")
             else:
                 await page.keyboard.press("Enter")
-        
-        _log(f"Usuario '{user}' autenticado con éxito en Intranet.", success=True)
+
+        _log(f"Usuario {user} autenticado exitosamente.", success=True)
+
         popup = await page_info.value
         await popup.wait_for_load_state()
+        await asyncio.sleep(3)
+
         storage = await context.storage_state()
         await context.close()
         return storage
     except Exception as e:
-        _log(f"Error durante el login en Intranet: {e}", error=True)
+        _log(f"Error durante el login: {e}", error=True)
         return None
     
 
@@ -348,19 +352,24 @@ async def orchestrator(
     try:
         preparar_entorno()
 
-        col_status = "Status Asignacion" if tipo_tarea == "wizard" else "Status SUGO"
+        col_status_asignacion = "Status Asignacion"
+        col_status_informe = "Status Informe"
         cols_necesarias = ["Folio Sugo", "Folio Wizard", "Tipo Respuesta", "Selfservice", "Dictamen Wizard", "Informe"]
 
         ruta_excel = excel_path if excel_path else settings.INPUT_FILE
         excel_name = Path(ruta_excel).stem if ruta_excel else "Oficios"
         progreso_file = Path(ruta_excel).parent / f"{excel_name}_resultados.csv" if ruta_excel else settings.FILE_EXITOS
 
-        df = cargar_datos(cols_necesarias, col_status, excel_path, progreso_file, log_callback)
+        df = cargar_datos(cols_necesarias, col_status_asignacion, col_status_informe, excel_path, progreso_file, log_callback)
         if df is None:
             _log("No se pudo cargar el archivo de datos. Proceso cancelado.", error=True)
             return
+        
+        if tipo_tarea == "wizard":
+            pendientes = df[df[col_status_asignacion] != "Completado"].index.tolist()
+        elif tipo_tarea == "sugo":
+            pendientes = df[df[col_status_informe] != "Completado"].index.tolist()
 
-        pendientes = df[df[col_status] == "Pendiente"].index.tolist()
         total = len(pendientes)
         _log(f"Folios pendientes a procesar: {total}")
 
@@ -400,7 +409,7 @@ async def orchestrator(
                     _log("Error de autenticación. No se puede continuar.", error=True)
                     await browser.close()
                     return
-                context = await browser.new_context(storage_state=storage)
+                context = await browser.new_context(storage_state=storage, ignore_https_errors=True)
 
             try:
                 page = context.pages[0] if context.pages else await context.new_page()
@@ -415,6 +424,8 @@ async def orchestrator(
 
                     if tipo_tarea == "wizard":
                         resultado = await finalizacion_wizard(datos, page)
+
+                        df.at[idx, col_status_asignacion] = resultado
                     else:
                         resultado_dict = await cierre_operaciones_asig_juridico(datos, page, informes_dir=informes_dir)
                         resultado = resultado_dict.get("status", "Error")
@@ -422,7 +433,7 @@ async def orchestrator(
                         if resultado == "ERROR" and motivo:
                             _log(f"  → Error en folio {folio}: {motivo}", error=True)
 
-                    df.at[idx, col_status] = resultado
+                        df.at[idx, col_status_informe] = resultado
 
                     if status_callback:
                         status_callback(idx, resultado)

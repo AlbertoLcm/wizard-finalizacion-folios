@@ -187,7 +187,7 @@ class PanelControls(ctk.CTkFrame):
         from tkinter import filedialog
         path = filedialog.askopenfilename(
             title="Seleccionar archivo Excel",
-            filetypes=[("Archivos de Excel", "*.xlsx;*.xls;*.csv")]
+            filetypes=[("Archivos de Excel", ("*.xlsx", "*.xls", "*.csv"))] 
         )
         if path:
             self.set_excel_path(path)
