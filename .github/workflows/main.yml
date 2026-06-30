@@ -35,6 +35,6 @@ jobs:
     - name: Guardar el ejecutable como Artefacto
       uses: actions/upload-artifact@v4
       with:
-        name: programa-playwright-windows
+        name: wizard-finalizacion-folios
         # Corrección: Como tu script es Bot_final.py, PyInstaller genera Bot_final.exe
         path: dist/main.exe
