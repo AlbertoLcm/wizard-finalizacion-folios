@@ -26,7 +26,7 @@ URL_LOGIN             = "https://acprod.intranet.com.mx/mbom_mx_ws/mbom_mx_web/P
 URL_CIERRE_OPERACIONES = "https://acprod.intranet.com.mx/boixp_mx_web/boixp_mx_web/servlet/ServletOperacionWeb?OPERACION=VGOMX060&LOCALE=es_ES&DATOS_ENTRADA.FLUJO_LANZAR=GOMXFL15230"
 URL_SUGO              = "https://acprod.intranet.com.mx/mbom_mx_ws/mbom_mx_web/mbom_mx_web_jsp/portal3.jsp"
 
-APP_TITLE = "Bot Wizard - Panel de Control"
+APP_TITLE = "Bot Wizard - Finalización Folios"
 APP_GEOMETRY = "1000x650"
 
 COLOR_ELECTRIC = "#001391"

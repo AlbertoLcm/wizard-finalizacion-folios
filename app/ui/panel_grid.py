@@ -1,4 +1,6 @@
 import customtkinter as ctk
+from tkinter import ttk
+import tkinter as tk
 from app.config import settings
 
 class PanelGrid(ctk.CTkFrame):
@@ -31,38 +33,145 @@ class PanelGrid(ctk.CTkFrame):
         self.linea_decorativa = ctk.CTkFrame(self, height=1, fg_color="#E2E8F0")
         self.linea_decorativa.pack(fill="x", padx=25, pady=(0, 10))
 
-        # --- Encabezados de la Tabla ---
-        self.frame_table_headers = ctk.CTkFrame(self, fg_color="#F8FAFC", height=35, corner_radius=6)
-        self.frame_table_headers.pack(fill="x", padx=25, pady=(0, 5))
-        self.frame_table_headers.pack_propagate(False)
-
-        # Configurar columnas
-        self.column_weights = [1.5, 1.5, 3.0, 2.0, 2.0]  # Folio Sugo, Folio Wizard, Tipo Respuesta, Informe, Estatus
-        self.column_titles = ["Folio Sugo", "Folio Wizard", "Tipo Respuesta", "Informe", "Estatus"]
-
-        for col_idx, (title, weight) in enumerate(zip(self.column_titles, self.column_weights)):
-            self.frame_table_headers.grid_columnconfigure(col_idx, weight=int(weight * 10))
+        # --- Estadísticas (Stats) ---
+        self.frame_stats = ctk.CTkFrame(self, fg_color="transparent")
+        self.frame_stats.pack(fill="x", padx=25, pady=(0, 15))
+        
+        # Configurar 4 columnas uniformes para las tarjetas
+        for c in range(4):
+            self.frame_stats.grid_columnconfigure(c, weight=1, uniform="stat_cols")
             
-            lbl = ctk.CTkLabel(
-                self.frame_table_headers, text=title,
-                font=ctk.CTkFont(family="Roboto", size=12, weight="bold"),
-                text_color="#475569",
-                anchor="w"
-            )
-            lbl.grid(row=0, column=col_idx, padx=10, pady=5, sticky="ew")
+        # Crear las tarjetas de estadísticas
+        self.card_total = self._crear_stat_card(self.frame_stats, 0, "Total", "0", "#64748B", "#F1F5F9")
+        self.card_pendientes = self._crear_stat_card(self.frame_stats, 1, "Pendientes", "0", "#475569", "#F8FAFC")
+        self.card_procesados = self._crear_stat_card(self.frame_stats, 2, "Procesados", "0", "#065F46", "#F0FDF4")
+        self.card_errores = self._crear_stat_card(self.frame_stats, 3, "Con Error", "0", "#991B1B", "#FEF2F2")
 
-        # --- Cuerpo de la Tabla (Scrollable) ---
-        self.scroll_frame = ctk.CTkScrollableFrame(
-            self, 
-            fg_color="transparent",
-            scrollbar_button_color="#CBD5E1",
-            scrollbar_button_hover_color="#94A3B8"
+        # --- Contenedor de la Tabla ---
+        self.frame_table = ctk.CTkFrame(self, fg_color="transparent", border_width=0)
+        self.frame_table.pack(fill="both", expand=True, padx=25, pady=(0, 20))
+
+        # Configuración de estilos ttk para Treeview
+        self.style = ttk.Style()
+        self.style.theme_use("clam")
+
+        # Configurar colores y diseño general para mimetizar la interfaz
+        self.style.configure(
+            "Custom.Treeview",
+            background=settings.COLOR_WHITE,
+            foreground="#1E293B",
+            rowheight=35,
+            fieldbackground=settings.COLOR_WHITE,
+            font=("Roboto", 11),
+            border_width=0
         )
-        self.scroll_frame.pack(fill="both", expand=True, padx=25, pady=(0, 20))
 
-        # Diccionario para guardar referencias de los widgets de status para actualización rápida
-        # { index_fila: { 'status_lbl': CTkLabel, 'row_frame': CTkFrame } }
-        self.row_widgets = {}
+        self.style.configure(
+            "Custom.Treeview.Heading",
+            background="#F8FAFC",
+            foreground="#475569",
+            font=("Roboto", 11, "bold"),
+            relief="flat"
+        )
+        
+        self.style.map(
+            "Custom.Treeview.Heading",
+            background=[("active", "#E2E8F0")],
+            foreground=[("active", "#0F172A")]
+        )
+
+        self.style.map(
+            "Custom.Treeview",
+            background=[("selected", "#EFF6FF")],
+            foreground=[("selected", "#1D4ED8")]
+        )
+
+        # Crear Treeview
+        self.column_ids = ("folio_sugo", "folio_wizard", "tipo_respuesta", "informe", "estatus")
+        self.tree = ttk.Treeview(
+            self.frame_table,
+            columns=self.column_ids,
+            show="headings",
+            style="Custom.Treeview",
+            selectmode="browse"
+        )
+
+        # Scrollbar responsiva (CustomTkinter)
+        self.scrollbar = ctk.CTkScrollbar(self.frame_table, orientation="vertical", command=self.tree.yview)
+        self.tree.configure(yscrollcommand=self.scrollbar.set)
+
+        self.tree.pack(side="left", fill="both", expand=True)
+        self.scrollbar.pack(side="right", fill="y", padx=(5, 0))
+
+        # Configuración de columnas
+        column_configs = {
+            "folio_sugo": {"text": "Folio Sugo", "width": 110, "anchor": "w"},
+            "folio_wizard": {"text": "Folio Wizard", "width": 110, "anchor": "w"},
+            "tipo_respuesta": {"text": "Tipo Respuesta", "width": 250, "anchor": "w"},
+            "informe": {"text": "Informe", "width": 200, "anchor": "w"},
+            "estatus": {"text": "Estatus", "width": 120, "anchor": "center"}
+        }
+
+        for col_id, config in column_configs.items():
+            self.tree.heading(col_id, text=config["text"], anchor=config["anchor"])
+            self.tree.column(col_id, width=config["width"], minwidth=50, anchor=config["anchor"], stretch=True)
+
+        # Configurar tags de filas para estatus coloreados
+        self.tree.tag_configure("evenrow", background=settings.COLOR_WHITE)
+        self.tree.tag_configure("oddrow", background="#F8FAFC")
+        self.tree.tag_configure("status_pendiente", foreground="#475569", background=settings.COLOR_WHITE)
+        self.tree.tag_configure("status_procesando", foreground="#1D4ED8", background="#EFF6FF")
+        self.tree.tag_configure("status_completado", foreground="#065F46", background="#F0FDF4")
+        self.tree.tag_configure("status_error", foreground="#991B1B", background="#FEF2F2")
+        self.tree.tag_configure("status_warning", foreground="#92400E", background="#FEF3C7")
+
+        # Mapeo de índices de fila a ID del item del Treeview
+        self.row_items = {}
+
+    def _crear_stat_card(self, parent, column, title, val, text_color, bg_color):
+        """Helper para construir una tarjeta visual de métricas sin emojis."""
+        card = ctk.CTkFrame(parent, fg_color=bg_color, corner_radius=10, border_width=1, border_color="#E2E8F0")
+        card.grid(row=0, column=column, padx=5, sticky="nsew")
+        
+        lbl_title = ctk.CTkLabel(
+            card, text=title,
+            font=ctk.CTkFont(family="Roboto", size=11, weight="bold"),
+            text_color="#64748B"
+        )
+        lbl_title.pack(anchor="w", padx=12, pady=(8, 2))
+        
+        lbl_val = ctk.CTkLabel(
+            card, text=val,
+            font=ctk.CTkFont(family="Roboto", size=20, weight="bold"),
+            text_color=text_color
+        )
+        lbl_val.pack(anchor="w", padx=12, pady=(0, 8))
+        
+        return lbl_val
+
+    def recalcular_estadisticas(self):
+        """Calcula el total de filas, pendientes, procesados y errores, y actualiza las tarjetas."""
+        total = 0
+        pendientes = 0
+        procesados = 0
+        errores = 0
+        
+        for item in self.tree.get_children():
+            total += 1
+            valores = self.tree.item(item, "values")
+            if len(valores) > 4:
+                status = str(valores[4]).lower()
+                if "pendiente" in status:
+                    pendientes += 1
+                elif "error" in status:
+                    errores += 1
+                else:
+                    procesados += 1
+                    
+        self.card_total.configure(text=str(total))
+        self.card_pendientes.configure(text=str(pendientes))
+        self.card_procesados.configure(text=str(procesados))
+        self.card_errores.configure(text=str(errores))
 
     def cargar_datos(self, df):
         """Limpia la tabla anterior y carga el DataFrame de pandas."""
@@ -70,6 +179,7 @@ class PanelGrid(ctk.CTkFrame):
 
         if df is None or df.empty:
             self.lbl_count.configure(text="0 registros")
+            self.recalcular_estadisticas()
             return
 
         total_filas = len(df)
@@ -78,117 +188,78 @@ class PanelGrid(ctk.CTkFrame):
         # Determinar qué columna contiene el estatus
         col_status = "Status Asignacion" if "Status Asignacion" in df.columns else "Status SUGO"
         if col_status not in df.columns:
-            # Si no está ninguno de los dos, buscar uno que contenga 'status' o 'estatus'
             status_cols = [c for c in df.columns if "status" in c.lower() or "estatus" in c.lower()]
             col_status = status_cols[0] if status_cols else None
 
         for idx, row in df.iterrows():
-            # Color de fondo alterno para filas
-            bg_color = settings.COLOR_WHITE if idx % 2 == 0 else "#F8FAFC"
-            
-            row_frame = ctk.CTkFrame(self.scroll_frame, fg_color=bg_color, height=40, corner_radius=6)
-            row_frame.pack(fill="x", pady=2)
-            row_frame.pack_propagate(False)
-
-            # Configurar las columnas en el frame de la fila
-            for col_idx, weight in enumerate(self.column_weights):
-                row_frame.grid_columnconfigure(col_idx, weight=int(weight * 10))
-
-            # Extraer valores
             val_sugo = str(row.get("Folio Sugo", "")).strip()
             val_wizard = str(row.get("Folio Wizard", "")).strip()
             val_tipo = str(row.get("Tipo Respuesta", "")).strip()
             val_informe = str(row.get("Informe", "")).strip()
-            
-            # Quitar .0 si pandas lo leyó como float
+            val_status = str(row.get(col_status, "Pendiente")).strip() if col_status else "Pendiente"
+
             if val_sugo.endswith(".0"): val_sugo = val_sugo[:-2]
             if val_wizard.endswith(".0"): val_wizard = val_wizard[:-2]
 
-            # Estatus inicial
-            val_status = str(row.get(col_status, "Pendiente")).strip() if col_status else "Pendiente"
-
-            # Crear celdas de texto
-            lbl_sugo = ctk.CTkLabel(row_frame, text=val_sugo, font=ctk.CTkFont(size=12), text_color="#1E293B", anchor="w")
-            lbl_sugo.grid(row=0, column=0, padx=10, pady=8, sticky="ew")
-
-            lbl_wizard = ctk.CTkLabel(row_frame, text=val_wizard, font=ctk.CTkFont(size=12), text_color="#1E293B", anchor="w")
-            lbl_wizard.grid(row=0, column=1, padx=10, pady=8, sticky="ew")
-
-            lbl_tipo = ctk.CTkLabel(row_frame, text=val_tipo, font=ctk.CTkFont(size=12), text_color="#1E293B", anchor="w")
-            lbl_tipo.grid(row=0, column=2, padx=10, pady=8, sticky="ew")
-
-            # Acortar nombre de informe si es muy largo
-            display_informe = val_informe
-            if len(display_informe) > 20:
-                display_informe = display_informe[:17] + "..."
-            lbl_informe = ctk.CTkLabel(row_frame, text=display_informe, font=ctk.CTkFont(size=12), text_color="#64748B", anchor="w")
-            lbl_informe.grid(row=0, column=3, padx=10, pady=8, sticky="ew")
-
-            # Celda de Estatus (Badge)
-            lbl_status = ctk.CTkLabel(
-                row_frame, 
-                text=val_status, 
-                font=ctk.CTkFont(size=11, weight="bold"),
-                width=100,
-                height=24,
-                corner_radius=12
+            # Insertar registro en el Treeview
+            item_id = self.tree.insert(
+                "",
+                "end",
+                values=(val_sugo, val_wizard, val_tipo, val_informe, val_status)
             )
-            lbl_status.grid(row=0, column=4, padx=10, pady=8, sticky="w")
-            
-            # Aplicar colores de badge
-            self._aplicar_estilo_badge(lbl_status, val_status)
 
-            # Guardar referencia para actualizaciones en tiempo real
-            self.row_widgets[idx] = {
-                'status_lbl': lbl_status,
-                'row_frame': row_frame
-            }
+            # Guardar referencia
+            self.row_items[idx] = item_id
+
+            # Aplicar estilo de fila según estatus inicial
+            self._aplicar_estilo_fila(item_id, idx, val_status)
+            
+        self.recalcular_estadisticas()
 
     def actualizar_estatus(self, row_index, nuevo_estatus):
-        """Actualiza el estatus de una fila específica y cambia los colores del badge en tiempo real."""
-        if row_index in self.row_widgets:
-            widgets = self.row_widgets[row_index]
-            lbl = widgets['status_lbl']
-            frame = widgets['row_frame']
+        """Actualiza el estatus de una fila específica en tiempo real."""
+        if row_index in self.row_items:
+            item_id = self.row_items[row_index]
             
-            # Actualizar texto y color del badge
-            lbl.configure(text=nuevo_estatus)
-            self._aplicar_estilo_badge(lbl, nuevo_estatus)
+            # Obtener valores actuales y actualizar la columna estatus (índice 4)
+            valores = list(self.tree.item(item_id, "values"))
+            valores[4] = nuevo_estatus
+            self.tree.item(item_id, values=valores)
             
-            # Si está procesando, dar un fondo sutil a toda la fila
-            if nuevo_estatus in ("Procesando", "Ejecutando"):
-                frame.configure(fg_color="#EFF6FF") # Light blue tint
-            elif nuevo_estatus in ("Completado", "OK"):
-                frame.configure(fg_color="#F0FDF4") # Light green tint
-            elif nuevo_estatus == "Error":
-                frame.configure(fg_color="#FEF2F2") # Light red tint
-            else:
-                # Restaurar color normal
-                bg_color = settings.COLOR_WHITE if row_index % 2 == 0 else "#F8FAFC"
-                frame.configure(fg_color=bg_color)
-                
-            # Hacer scroll para ver la fila activa
-            self.scroll_frame._parent_canvas.yview_moveto(row_index / len(self.row_widgets))
+            # Re-aplicar estilo
+            self._aplicar_estilo_fila(item_id, row_index, nuevo_estatus)
+            
+            # Auto-scroll para que el elemento sea visible
+            self.tree.see(item_id)
+            
+            # Seleccionar la fila activa
+            self.tree.selection_set(item_id)
+            
+            # Actualizar tarjetas de estadísticas
+            self.recalcular_estadisticas()
 
-    def _aplicar_estilo_badge(self, label, status):
-        """Aplica estilos CSS-like (Tailwind) al badge de estatus según su valor."""
+    def _aplicar_estilo_fila(self, item_id, row_index, status):
+        """Asigna los tags de estilo correspondientes según el estatus del folio."""
         status_lower = status.lower()
         
         if "pendiente" in status_lower:
-            label.configure(fg_color="#E2E8F0", text_color="#475569")  # Slate Gray
+            tag = "status_pendiente"
         elif "procesando" in status_lower or "ejecutando" in status_lower:
-            label.configure(fg_color="#DBEAFE", text_color="#1D4ED8")  # Blue
+            tag = "status_procesando"
         elif "completado" in status_lower or status_lower == "ok":
-            label.configure(fg_color="#D1FAE5", text_color="#065F46")  # Green
+            tag = "status_completado"
         elif "error" in status_lower:
-            label.configure(fg_color="#FEE2E2", text_color="#991B1B")  # Red
+            tag = "status_error"
         elif "no encontrado" in status_lower or "omitido" in status_lower:
-            label.configure(fg_color="#FEF3C7", text_color="#92400E")  # Amber / Orange
+            tag = "status_warning"
         else:
-            label.configure(fg_color="#F1F5F9", text_color="#475569")  # Neutral Gray
+            tag = "evenrow" if row_index % 2 == 0 else "oddrow"
+            
+        self.tree.item(item_id, tags=(tag,))
 
     def limpiar_tabla(self):
         """Elimina todas las filas de la tabla."""
-        for widget in self.scroll_frame.winfo_children():
-            widget.destroy()
-        self.row_widgets.clear()
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+        self.row_items.clear()
+        self.recalcular_estadisticas()

@@ -105,13 +105,13 @@ class PanelControls(ctk.CTkFrame):
         self.linea_separadora.pack(fill="x", padx=35, pady=(10, 8))
 
         # Botones de Acción usando los Callbacks recibidos por parámetro
-        self.btn_1 = self.crear_boton("    1. Iniciar Sesión                                    >", cmd_login)
+        self.btn_1 = self.crear_boton("    1. Iniciar Sesión", cmd_login)
         self.btn_1.pack(pady=5, padx=35, fill="x")
 
-        self.btn_2 = self.crear_boton("    2. Cierre Folio Wizard                        >", cmd_wizard)
+        self.btn_2 = self.crear_boton("    2. Cierre Folio Wizard", cmd_wizard)
         self.btn_2.pack(pady=5, padx=35, fill="x")
 
-        self.btn_3 = self.crear_boton("    3. Adjuntar Informe SUGO                >", cmd_sugo)
+        self.btn_3 = self.crear_boton("    3. Adjuntar Informe SUGO", cmd_sugo)
         self.btn_3.pack(pady=5, padx=35, fill="x")
 
         self.btn_exit = self.crear_boton_con_imagen("4. Salir", icon_off, cmd_exit, white=True)
