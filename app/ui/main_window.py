@@ -11,6 +11,7 @@ from app.ui.panel_logs import PanelLogs
 from app.ui.panel_controls import PanelControls
 from app.ui.panel_grid import PanelGrid
 from app.ui.dialog_login import DialogLogin
+from app.ui.dialog_resume import DialogResume
 
 
 class BotWizardApp(ctk.CTk):
@@ -179,63 +180,93 @@ class BotWizardApp(ctk.CTk):
 
         self._ejecutar_en_hilo(_tarea())
 
+    def _verificar_progreso_y_ejecutar(self, ejecutar_callback):
+        if not self.excel_path:
+            self._log("Por favor, seleccione un archivo Excel de entrada antes de iniciar.", error=True)
+            return
+
+        from pathlib import Path
+        import os
+        excel_path_obj = Path(self.excel_path)
+        excel_name = excel_path_obj.stem
+        progreso_file = excel_path_obj.parent / f"{excel_name}_resultados.csv"
+
+        if os.path.exists(progreso_file):
+            def on_resume():
+                self._log("Retomando el progreso anterior...", success=True)
+                ejecutar_callback()
+
+            def on_fresh():
+                try:
+                    os.remove(progreso_file)
+                    self._log("Progreso anterior eliminado. Iniciando desde cero...", success=True)
+                except Exception as e:
+                    self._log(f"No se pudo limpiar el progreso anterior: {e}", error=True)
+                self.cargar_datos_excel()
+                ejecutar_callback()
+
+            def on_cancel():
+                self._log("Operación cancelada por el usuario.", warning=True)
+
+            DialogResume(self, callback_resume=on_resume, callback_fresh=on_fresh, callback_cancel=on_cancel)
+        else:
+            ejecutar_callback()
+
     def cmd_wizard(self):
         """Botón 2 — Cierre Folio Wizard."""
-        if not self.excel_path:
-            self._log("Por favor, seleccione un archivo Excel de entrada antes de iniciar.", error=True)
-            return
-
-        modo_oculto = self.panel_izq.get_modo_oculto()
-        modo_txt = "oculto (headless)" if modo_oculto else "visible"
-        self._log(f"Iniciando Cierre Folio Wizard en modo {modo_txt}...")
-        self._set_estado("Ejecutando Wizard...", color=settings.COLOR_CYAN, is_processing=True)
-        self._set_ui_bloqueada(True)
-
-        coro = orchestrator(
-            tipo_tarea="wizard",
-            modo_oculto=modo_oculto,
-            log_callback=self._log,
-            done_callback=self._on_proceso_terminado,
-            excel_path=self.excel_path,
-            informes_dir=self.informes_path,
-            status_callback=self._update_row_status,
-        )
-        self._ejecutar_en_hilo(coro)
-
-    def cmd_sugo(self):
-        """Botón 3 — Adjuntar Informe SUGO (pide credenciales primero)."""
-        if not self.excel_path:
-            self._log("Por favor, seleccione un archivo Excel de entrada antes de iniciar.", error=True)
-            return
-
-        self._log("Preparando proceso SUGO. Solicitando credenciales...")
-        self._set_estado("Esperando credenciales...", color=settings.COLOR_CYAN, is_processing=True)
-        self._set_ui_bloqueada(True)
-
-        def _on_credenciales_ok(user: str, password: str):
+        def _iniciar_wizard():
             modo_oculto = self.panel_izq.get_modo_oculto()
             modo_txt = "oculto (headless)" if modo_oculto else "visible"
-            self._log(f"Credenciales recibidas. Iniciando SUGO en modo {modo_txt}...")
-            self._set_estado("Adjuntando informe SUGO...", color=settings.COLOR_CYAN, is_processing=True)
+            self._log(f"Iniciando Cierre Folio Wizard en modo {modo_txt}...")
+            self._set_estado("Ejecutando Wizard...", color=settings.COLOR_CYAN, is_processing=True)
+            self._set_ui_bloqueada(True)
 
             coro = orchestrator(
-                tipo_tarea="sugo",
+                tipo_tarea="wizard",
                 modo_oculto=modo_oculto,
                 log_callback=self._log,
                 done_callback=self._on_proceso_terminado,
-                user=user,
-                password=password,
                 excel_path=self.excel_path,
                 informes_dir=self.informes_path,
                 status_callback=self._update_row_status,
             )
             self._ejecutar_en_hilo(coro)
 
-        def _on_cancelado():
-            self._log("Proceso SUGO cancelado por el usuario.", warning=True)
-            self._on_proceso_terminado()
+        self._verificar_progreso_y_ejecutar(_iniciar_wizard)
 
-        DialogLogin(self, callback_ok=_on_credenciales_ok, callback_cancel=_on_cancelado)
+    def cmd_sugo(self):
+        """Botón 3 — Adjuntar Informe SUGO (pide credenciales primero)."""
+        def _iniciar_sugo():
+            self._log("Preparando proceso SUGO. Solicitando credenciales...")
+            self._set_estado("Esperando credenciales...", color=settings.COLOR_CYAN, is_processing=True)
+            self._set_ui_bloqueada(True)
+
+            def _on_credenciales_ok(user: str, password: str):
+                modo_oculto = self.panel_izq.get_modo_oculto()
+                modo_txt = "oculto (headless)" if modo_oculto else "visible"
+                self._log(f"Credenciales recibidas. Iniciando SUGO en modo {modo_txt}...")
+                self._set_estado("Adjuntando informe SUGO...", color=settings.COLOR_CYAN, is_processing=True)
+
+                coro = orchestrator(
+                    tipo_tarea="sugo",
+                    modo_oculto=modo_oculto,
+                    log_callback=self._log,
+                    done_callback=self._on_proceso_terminado,
+                    user=user,
+                    password=password,
+                    excel_path=self.excel_path,
+                    informes_dir=self.informes_path,
+                    status_callback=self._update_row_status,
+                )
+                self._ejecutar_en_hilo(coro)
+
+            def _on_cancelado():
+                self._log("Proceso SUGO cancelado por el usuario.", warning=True)
+                self._on_proceso_terminado()
+
+            DialogLogin(self, callback_ok=_on_credenciales_ok, callback_cancel=_on_cancelado)
+
+        self._verificar_progreso_y_ejecutar(_iniciar_sugo)
 
     # ==========================================
     # CALLBACKS DE SELECCIÓN DE ENTRADAS
