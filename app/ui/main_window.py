@@ -9,6 +9,7 @@ from app.core.bots import autenticar_google, orchestrator
 
 from app.ui.panel_logs import PanelLogs
 from app.ui.panel_controls import PanelControls
+from app.ui.panel_grid import PanelGrid
 from app.ui.dialog_login import DialogLogin
 
 
@@ -42,18 +43,23 @@ class BotWizardApp(ctk.CTk):
         )
 
         self.title(settings.APP_TITLE)
-        self.geometry(settings.APP_GEOMETRY)
-        self.resizable(False, False)
+        self.geometry("1200x800")
+        self.resizable(True, True)
         self.configure(fg_color=settings.COLOR_SAND)
+
+        # Variables de estado
+        self.excel_path = None
+        self.informes_path = None
 
         # ==========================================
         # --- INTERFAZ ---
         # ==========================================
 
-        self.grid_columnconfigure(0, weight=4, minsize=400)
-        self.grid_columnconfigure(1, weight=6, minsize=600)
-        self.grid_rowconfigure(0, weight=1)
-        self.grid_rowconfigure(1, weight=0)
+        self.grid_columnconfigure(0, weight=3, minsize=350)
+        self.grid_columnconfigure(1, weight=7, minsize=800)
+        self.grid_rowconfigure(0, weight=5, minsize=350) # Grid
+        self.grid_rowconfigure(1, weight=5, minsize=350) # Logs
+        self.grid_rowconfigure(2, weight=0)              # Bottom bar
 
         # ==========================================
         # --- PANEL IZQUIERDO (CONTROLES) ---
@@ -67,20 +73,28 @@ class BotWizardApp(ctk.CTk):
             cmd_exit=self.destroy,
             cmd_sugo=self.cmd_sugo,
             cmd_wizard=self.cmd_wizard,
+            cmd_excel_selected=self.on_excel_selected,
+            cmd_folder_selected=self.on_folder_selected,
         )
-        self.panel_izq.grid(row=0, column=0, padx=(20, 10), pady=(20, 20), sticky="nsew")
+        self.panel_izq.grid(row=0, column=0, rowspan=2, padx=(20, 10), pady=(20, 10), sticky="nsew")
 
         # ==========================================
-        # --- PANEL DERECHO (LOGS) ---
+        # --- PANEL DERECHO SUPERIOR (GRID) ---
+        # ==========================================
+        self.panel_grid = PanelGrid(self)
+        self.panel_grid.grid(row=0, column=1, padx=(10, 20), pady=(20, 10), sticky="nsew")
+
+        # ==========================================
+        # --- PANEL DERECHO INFERIOR (LOGS) ---
         # ==========================================
         self.panel_logs = PanelLogs(self, icon_trash=self.icon_trash)
-        self.panel_logs.grid(row=0, column=1, padx=(10, 20), pady=(20, 20), sticky="nsew")
+        self.panel_logs.grid(row=1, column=1, padx=(10, 20), pady=(10, 10), sticky="nsew")
 
         # ==========================================
         # --- BARRA INFERIOR (BRANDING) ---
         # ==========================================
         self.panel_bottom = ctk.CTkFrame(self, fg_color=settings.COLOR_DARK_BLUE, height=35, corner_radius=0)
-        self.panel_bottom.grid(row=1, column=0, columnspan=2, sticky="nsew")
+        self.panel_bottom.grid(row=2, column=0, columnspan=2, sticky="nsew")
         self.panel_bottom.pack_propagate(False)
 
         self.lbl_brand_left = ctk.CTkLabel(
@@ -96,6 +110,17 @@ class BotWizardApp(ctk.CTk):
             font=ctk.CTkFont(size=12), text_color="white"
         )
         self.lbl_brand_right.pack(side="right", padx=20)
+
+        # Cargar valores por defecto si existen
+        import os
+        if os.path.exists(settings.INPUT_FILE):
+            self.excel_path = str(settings.INPUT_FILE)
+            self.panel_izq.set_excel_path(self.excel_path)
+            self.cargar_datos_excel()
+
+        if os.path.exists(settings.DOCUMENTS_UPLOAD):
+            self.informes_path = str(settings.DOCUMENTS_UPLOAD)
+            self.panel_izq.set_folder_path(self.informes_path)
 
         self.panel_logs.agregar_log("Sistema Bot Wizard iniciado correctamente.", success=True)
 
@@ -156,6 +181,10 @@ class BotWizardApp(ctk.CTk):
 
     def cmd_wizard(self):
         """Botón 2 — Cierre Folio Wizard."""
+        if not self.excel_path:
+            self._log("Por favor, seleccione un archivo Excel de entrada antes de iniciar.", error=True)
+            return
+
         modo_oculto = self.panel_izq.get_modo_oculto()
         modo_txt = "oculto (headless)" if modo_oculto else "visible"
         self._log(f"Iniciando Cierre Folio Wizard en modo {modo_txt}...")
@@ -167,11 +196,18 @@ class BotWizardApp(ctk.CTk):
             modo_oculto=modo_oculto,
             log_callback=self._log,
             done_callback=self._on_proceso_terminado,
+            excel_path=self.excel_path,
+            informes_dir=self.informes_path,
+            status_callback=self._update_row_status,
         )
         self._ejecutar_en_hilo(coro)
 
     def cmd_sugo(self):
         """Botón 3 — Adjuntar Informe SUGO (pide credenciales primero)."""
+        if not self.excel_path:
+            self._log("Por favor, seleccione un archivo Excel de entrada antes de iniciar.", error=True)
+            return
+
         self._log("Preparando proceso SUGO. Solicitando credenciales...")
         self._set_estado("Esperando credenciales...", color=settings.COLOR_CYAN, is_processing=True)
         self._set_ui_bloqueada(True)
@@ -189,6 +225,9 @@ class BotWizardApp(ctk.CTk):
                 done_callback=self._on_proceso_terminado,
                 user=user,
                 password=password,
+                excel_path=self.excel_path,
+                informes_dir=self.informes_path,
+                status_callback=self._update_row_status,
             )
             self._ejecutar_en_hilo(coro)
 
@@ -197,3 +236,51 @@ class BotWizardApp(ctk.CTk):
             self._on_proceso_terminado()
 
         DialogLogin(self, callback_ok=_on_credenciales_ok, callback_cancel=_on_cancelado)
+
+    # ==========================================
+    # CALLBACKS DE SELECCIÓN DE ENTRADAS
+    # ==========================================
+
+    def on_excel_selected(self, path):
+        self.excel_path = path
+        self._log(f"Archivo Excel seleccionado: {path}")
+        self.cargar_datos_excel()
+
+    def on_folder_selected(self, path):
+        self.informes_path = path
+        self._log(f"Carpeta de informes seleccionada: {path}")
+
+    def cargar_datos_excel(self):
+        """Carga el Excel y lo muestra en el panel de grid."""
+        if not self.excel_path:
+            return
+        
+        try:
+            col_status = "Status Asignacion"
+            cols_necesarias = ["Folio Sugo", "Folio Wizard", "Tipo Respuesta", "Selfservice", "Dictamen Wizard", "Informe"]
+            
+            from pathlib import Path
+            excel_path_obj = Path(self.excel_path)
+            excel_name = excel_path_obj.stem
+            progreso_file = excel_path_obj.parent / f"{excel_name}_resultados.csv"
+            
+            from app.core.bots import cargar_datos
+            df = cargar_datos(
+                columnas_requeridas=cols_necesarias,
+                columna_status=col_status,
+                excel_path=self.excel_path,
+                progreso_file=str(progreso_file),
+                log_callback=self._log
+            )
+            if df is not None:
+                self.panel_grid.cargar_datos(df)
+                self._log(f"Se cargaron {len(df)} registros en la tabla.", success=True)
+            else:
+                self.panel_grid.limpiar_tabla()
+        except Exception as e:
+            self._log(f"Error al cargar datos del Excel: {e}", error=True)
+            self.panel_grid.limpiar_tabla()
+
+    def _update_row_status(self, idx, status):
+        """Actualiza el estatus de la fila en la tabla de forma segura en el hilo principal."""
+        self.after(0, lambda: self.panel_grid.actualizar_estatus(idx, status))

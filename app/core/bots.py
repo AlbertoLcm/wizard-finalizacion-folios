@@ -48,7 +48,7 @@ def preparar_entorno():
         Path(carpeta).mkdir(parents=True, exist_ok=True)
 
 
-def cargar_datos(columnas_requeridas, columna_status, log_callback: Optional[Callable] = None):
+def cargar_datos(columnas_requeridas, columna_status, excel_path: Optional[str] = None, progreso_file: Optional[str] = None, log_callback: Optional[Callable] = None):
     """Carga el progreso o el archivo inicial de forma genérica."""
     def _log(msg, **kw):
         if log_callback:
@@ -56,18 +56,27 @@ def cargar_datos(columnas_requeridas, columna_status, log_callback: Optional[Cal
         else:
             print(msg)
 
-    if os.path.exists(settings.FILE_EXITOS):
-        _log(f"Progreso previo encontrado. Continuando desde {settings.FILE_EXITOS}...", success=True)
-        df = pd.read_csv(settings.FILE_EXITOS)
+    ruta_excel = excel_path if excel_path else settings.INPUT_FILE
+    
+    if not progreso_file:
+        if ruta_excel:
+            excel_name = Path(ruta_excel).stem
+            progreso_file = Path(ruta_excel).parent / f"{excel_name}_resultados.csv"
+        else:
+            progreso_file = settings.FILE_EXITOS
+
+    if os.path.exists(progreso_file):
+        _log(f"Progreso previo encontrado. Continuando desde {progreso_file}...", success=True)
+        df = pd.read_csv(progreso_file)
         if set(columnas_requeridas).issubset(df.columns):
             return df
         _log("El archivo de progreso no tiene las columnas necesarias. Cargando original...", warning=True)
 
-    if not os.path.exists(settings.INPUT_FILE):
-        _log(f"No se encontró el archivo de entrada: {settings.INPUT_FILE}", error=True)
+    if not ruta_excel or not os.path.exists(ruta_excel):
+        _log(f"No se encontró el archivo de entrada: {ruta_excel}", error=True)
         return None
 
-    df = pd.read_excel(settings.INPUT_FILE)
+    df = pd.read_excel(ruta_excel)
     if not set(columnas_requeridas).issubset(df.columns):
         _log(f"El Excel debe contener las columnas: {', '.join(columnas_requeridas)}", error=True)
         return None
@@ -110,7 +119,7 @@ async def manejar_login_intranet(browser, user, password, log_callback: Optional
         return None
     
 
-async def cierre_operaciones_asig_juridico(datos: dict, page: Page):
+async def cierre_operaciones_asig_juridico(datos: dict, page: Page, informes_dir: Optional[str] = None):
     folio_sugo = str(datos.get("Folio Sugo", "")).strip()
     archivo = str(datos.get("Informe", "")).strip()
 
@@ -153,7 +162,8 @@ async def cierre_operaciones_asig_juridico(datos: dict, page: Page):
         pagina_upload = await upload_popup_info.value
         await pagina_upload.wait_for_load_state("domcontentloaded")
 
-        ruta_archivo_acuse = Path(settings.DOCUMENTS_UPLOAD) / archivo
+        base_dir = Path(informes_dir) if informes_dir else Path(settings.DOCUMENTS_UPLOAD)
+        ruta_archivo_acuse = base_dir / archivo
         input_file0 = pagina_upload.locator("#file0")
         await input_file0.set_input_files(ruta_archivo_acuse)
 
@@ -311,6 +321,9 @@ async def orchestrator(
     done_callback: Optional[Callable] = None,
     user: Optional[str] = None,
     password: Optional[str] = None,
+    excel_path: Optional[str] = None,
+    informes_dir: Optional[str] = None,
+    status_callback: Optional[Callable[[int, str], None]] = None,
 ):
     """
     Orquestador único para ambas tareas RPA.
@@ -322,6 +335,9 @@ async def orchestrator(
         done_callback: función() llamada al finalizar (exitoso o con error)
         user:          usuario de Intranet (solo para tipo_tarea='sugo')
         password:      contraseña de Intranet (solo para tipo_tarea='sugo')
+        excel_path:    ruta del archivo Excel de entrada
+        informes_dir:  ruta del directorio de informes a cargar
+        status_callback: función(row_index, status) para actualizar el estado visual de cada fila
     """
     def _log(msg, **kw):
         if log_callback:
@@ -335,7 +351,11 @@ async def orchestrator(
         col_status = "Status Asignacion" if tipo_tarea == "wizard" else "Status SUGO"
         cols_necesarias = ["Folio Sugo", "Folio Wizard", "Tipo Respuesta", "Selfservice", "Dictamen Wizard", "Informe"]
 
-        df = cargar_datos(cols_necesarias, col_status, log_callback)
+        ruta_excel = excel_path if excel_path else settings.INPUT_FILE
+        excel_name = Path(ruta_excel).stem if ruta_excel else "Oficios"
+        progreso_file = Path(ruta_excel).parent / f"{excel_name}_resultados.csv" if ruta_excel else settings.FILE_EXITOS
+
+        df = cargar_datos(cols_necesarias, col_status, excel_path, progreso_file, log_callback)
         if df is None:
             _log("No se pudo cargar el archivo de datos. Proceso cancelado.", error=True)
             return
@@ -390,16 +410,22 @@ async def orchestrator(
                     folio = str(datos.get("Folio Sugo", datos.get("Folio Wizard", idx))).strip()
                     _log(f"[{i+1}/{total}] Procesando folio: {folio}")
 
+                    if status_callback:
+                        status_callback(idx, "Procesando")
+
                     if tipo_tarea == "wizard":
                         resultado = await finalizacion_wizard(datos, page)
                     else:
-                        resultado_dict = await cierre_operaciones_asig_juridico(datos, page)
+                        resultado_dict = await cierre_operaciones_asig_juridico(datos, page, informes_dir=informes_dir)
                         resultado = resultado_dict.get("status", "Error")
                         motivo = resultado_dict.get("motivo", "")
                         if resultado == "ERROR" and motivo:
                             _log(f"  → Error en folio {folio}: {motivo}", error=True)
 
                     df.at[idx, col_status] = resultado
+
+                    if status_callback:
+                        status_callback(idx, resultado)
 
                     if resultado in ("Completado", "OK"):
                         _log(f"  → Folio {folio}: {resultado}", success=True)
@@ -410,11 +436,11 @@ async def orchestrator(
 
                     # Guardado incremental
                     if (i + 1) % settings.BATCH_GUARDADO == 0:
-                        df.to_csv(settings.FILE_EXITOS, index=False)
+                        df.to_csv(progreso_file, index=False)
                         _log(f"  Progreso guardado ({i+1}/{total} procesados)")
 
-                df.to_csv(settings.FILE_EXITOS, index=False)
-                _log(f"Proceso finalizado. Resultados guardados en: {settings.FILE_EXITOS}", success=True)
+                df.to_csv(progreso_file, index=False)
+                _log(f"Proceso finalizado. Resultados guardados en: {progreso_file}", success=True)
 
             finally:
                 await context.close()
