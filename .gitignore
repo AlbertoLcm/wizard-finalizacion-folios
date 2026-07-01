@@ -29,9 +29,6 @@ ENV/
 # Datos sensibles y archivos generados en runtime
 # ──────────────────────────────────────────────
 
-# Archivo de entrada con datos de folios
-Oficios.xlsx
-
 # Toda la carpeta de salida del bot (sesiones, resultados, documentos)
 dist/
 
