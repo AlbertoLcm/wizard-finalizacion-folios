@@ -1,24 +1,28 @@
+import sys
 from pathlib import Path
 
-# Raíz del proyecto (wizard-finalizacion-folios/)
-BASE_DIR = Path(__file__).resolve().parent.parent
+# ── DETECTAR SI ES UN EJECUTABLE (.EXE) O MODO DESARROLLO ──
+IS_FROZEN = getattr(sys, 'frozen', False)
 
-# ── Carpeta de salida: todos los artefactos generados en runtime van aquí ──
-DIST_DIR = BASE_DIR / "dist"
+if IS_FROZEN:
+    EXE_DIR = Path(sys.executable).parent
+    BUNDLE_DIR = Path(sys._MEIPASS)
+else:
+    EXE_DIR = Path(__file__).resolve().parent.parent
+    BUNDLE_DIR = EXE_DIR
 
-# Rutas de entrada (archivos que el usuario provee manualmente)
-INPUT_FILE = BASE_DIR / "Oficios.xlsx"
 
-# Rutas de salida (generadas / gestionadas por el bot)
+DIST_DIR = EXE_DIR / "dist"
+
+INPUT_FILE = EXE_DIR / "Oficios.xlsx"
+
 DOCUMENTS_UPLOAD = DIST_DIR / "Documentos"
 FILE_EXITOS       = DIST_DIR / "resultados_procesados.csv"
 USER_DATA_DIR     = DIST_DIR / "perfil_google_drive"
 
-# Otros
 BATCH_GUARDADO = 10
 
-# Assets de la UI
-ASSETS_DIR = BASE_DIR / "assets"
+ASSETS_DIR = BUNDLE_DIR / "assets"
 
 # URLs
 URL_WIZARD_MIS_TAREAS = "https://bbva-wizardautomexpress-am.appspot.com/wizardautomexpr-am/manager/manager-tasks"
