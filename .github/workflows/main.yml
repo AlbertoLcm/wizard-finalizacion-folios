@@ -2,23 +2,22 @@ name: Compilar Python + Playwright a EXE desde Features
 
 on:
   push:
-    # Se activará si la rama se llama exactamente "features" o empieza con "features/" (ej. features/cambios)
     branches: [ "features", "features/**" ]
-  workflow_dispatch: # Permite ejecutar el proceso manualmente desde GitHub seleccionando la rama
+  workflow_dispatch:
 
 jobs:
   build:
-    runs-on: windows-latest # Obligatorio Windows para generar el .exe
+    runs-on: windows-latest
 
     steps:
     - name: Descargar el código del repositorio
-      uses: actions/checkout@v4 # Descarga automáticamente la rama que activó el push
+      uses: actions/checkout@v4
 
     - name: Configurar Python
       uses: actions/setup-python@v5
       with:
         python-version: '3.11'
-        cache: 'pip' # Optimiza tiempos guardando dependencias en caché
+        cache: 'pip'
 
     - name: Instalar dependencias y PyInstaller
       run: |
@@ -26,15 +25,13 @@ jobs:
         pip install pyinstaller
         pip install -r requirements.txt
 
-    - name: Compilar Script con PyInstaller (Soporte Completo Playwright)
+    - name: Compilar Script con PyInstaller (Imágenes y Playwright)
       run: |
-        # Corrección: --collect-all va seguido de "playwright"
-        # --noconsole evita que se abra la ventana negra de la terminal al ejecutar el EXE
-        pyinstaller --onefile --noconsole --collect-all playwright main.py
+        # Usamos main.py y copiamos app/assets a la misma ruta dentro del .exe
+        pyinstaller --onefile --noconsole --collect-all playwright --add-data "app/assets;app/assets" main.py
 
     - name: Guardar el ejecutable como Artefacto
       uses: actions/upload-artifact@v4
       with:
-        name: wizard-finalizacion-folios
-        # Corrección: Como tu script es Bot_final.py, PyInstaller genera Bot_final.exe
+        name: bot-wizard-exe
         path: dist/main.exe

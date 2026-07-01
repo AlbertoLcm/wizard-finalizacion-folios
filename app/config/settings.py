@@ -5,24 +5,23 @@ from pathlib import Path
 IS_FROZEN = getattr(sys, 'frozen', False)
 
 if IS_FROZEN:
-    EXE_DIR = Path(sys.executable).parent
-    BUNDLE_DIR = Path(sys._MEIPASS)
+    BASE_DIR = Path(sys.executable).parent
+    
+    INTERNAL_DIR = Path(sys._MEIPASS)
 else:
-    EXE_DIR = Path(__file__).resolve().parent.parent
-    BUNDLE_DIR = EXE_DIR
+    BASE_DIR = Path(__file__).resolve().parent.parent.parent
+    INTERNAL_DIR = BASE_DIR
 
-
-DIST_DIR = EXE_DIR / "dist"
-
-INPUT_FILE = EXE_DIR / "Oficios.xlsx"
+DIST_DIR = BASE_DIR / "dist"
+INPUT_FILE = BASE_DIR / "Oficios.xlsx"
 
 DOCUMENTS_UPLOAD = DIST_DIR / "Documentos"
 FILE_EXITOS       = DIST_DIR / "resultados_procesados.csv"
 USER_DATA_DIR     = DIST_DIR / "perfil_google_drive"
 
-BATCH_GUARDADO = 10
+ASSETS_DIR = INTERNAL_DIR / "app" / "assets"
 
-ASSETS_DIR = BUNDLE_DIR / "assets"
+BATCH_GUARDADO = 10
 
 # URLs
 URL_WIZARD_MIS_TAREAS = "https://bbva-wizardautomexpress-am.appspot.com/wizardautomexpr-am/manager/manager-tasks"
