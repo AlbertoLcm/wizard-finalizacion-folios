@@ -3,10 +3,9 @@ from app.config import settings
 
 
 class PanelControls(ctk.CTkFrame):
-    def __init__(self, master, image_logo, icon_off, cmd_login, cmd_wizard, cmd_sugo, cmd_exit, cmd_excel_selected, cmd_folder_selected):
+    def __init__(self, master, image_logo, icon_off, cmd_login, cmd_wizard, cmd_sugo, cmd_exit, cmd_folder_selected):
         super().__init__(master, fg_color=settings.COLOR_WHITE, corner_radius=15, border_width=0)
 
-        self.cmd_excel_selected = cmd_excel_selected
         self.cmd_folder_selected = cmd_folder_selected
 
         self.lbl_imagen_robot = ctk.CTkLabel(
@@ -42,35 +41,6 @@ class PanelControls(ctk.CTkFrame):
             text_color=settings.COLOR_ELECTRIC
         )
         self.lbl_config_title.pack(pady=(5, 2), padx=35, anchor="w")
-        
-        # --- Selector de Excel ---
-        self.frame_excel = ctk.CTkFrame(self, fg_color="transparent")
-        self.frame_excel.pack(fill="x", padx=35, pady=2)
-        
-        self.lbl_excel_title = ctk.CTkLabel(
-            self.frame_excel, text="Archivo Excel (.xlsx):",
-            font=ctk.CTkFont(size=11), text_color=settings.COLOR_TEXT_MUTED
-        )
-        self.lbl_excel_title.pack(anchor="w")
-        
-        self.frame_excel_input = ctk.CTkFrame(self.frame_excel, fg_color="transparent")
-        self.frame_excel_input.pack(fill="x")
-        
-        self.entry_excel = ctk.CTkEntry(
-            self.frame_excel_input, placeholder_text="Seleccione un archivo...",
-            height=30, corner_radius=6, border_color="#CBD5E1", fg_color="#F8FAFC",
-            font=ctk.CTkFont(size=11)
-        )
-        self.entry_excel.pack(side="left", fill="x", expand=True, padx=(0, 6))
-        self.entry_excel.configure(state="readonly")
-        
-        self.btn_browse_excel = ctk.CTkButton(
-            self.frame_excel_input, text="Examinar", width=70, height=30, corner_radius=6,
-            fg_color="#F1F5F9", hover_color="#E2E8F0", text_color="#0F172A",
-            font=ctk.CTkFont(size=11, weight="bold"),
-            command=self._on_browse_excel
-        )
-        self.btn_browse_excel.pack(side="right")
         
         # --- Selector de Carpeta de Informes ---
         self.frame_folder = ctk.CTkFrame(self, fg_color="transparent")
@@ -183,17 +153,6 @@ class PanelControls(ctk.CTkFrame):
     # ==========================================
     # FILE DIALOG CALLBACKS
     # ==========================================
-    def _on_browse_excel(self):
-        from tkinter import filedialog
-        path = filedialog.askopenfilename(
-            title="Seleccionar archivo Excel",
-            filetypes=[("Archivos de Excel", ("*.xlsx", "*.xls", "*.csv"))] 
-        )
-        if path:
-            self.set_excel_path(path)
-            if self.cmd_excel_selected:
-                self.cmd_excel_selected(path)
-
     def _on_browse_folder(self):
         from tkinter import filedialog
         path = filedialog.askdirectory(
@@ -203,12 +162,6 @@ class PanelControls(ctk.CTkFrame):
             self.set_folder_path(path)
             if self.cmd_folder_selected:
                 self.cmd_folder_selected(path)
-
-    def set_excel_path(self, path):
-        self.entry_excel.configure(state="normal")
-        self.entry_excel.delete(0, "end")
-        self.entry_excel.insert(0, path)
-        self.entry_excel.configure(state="readonly")
 
     def set_folder_path(self, path):
         self.entry_folder.configure(state="normal")
@@ -285,5 +238,4 @@ class PanelControls(ctk.CTkFrame):
         self.btn_3.configure(state=estado)
         self.btn_exit.configure(state=estado)
         self.switch_headless.configure(state=estado)
-        self.btn_browse_excel.configure(state=estado)
         self.btn_browse_folder.configure(state=estado)

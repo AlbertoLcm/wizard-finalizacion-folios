@@ -74,7 +74,6 @@ class BotWizardApp(ctk.CTk):
             cmd_exit=self.destroy,
             cmd_sugo=self.cmd_sugo,
             cmd_wizard=self.cmd_wizard,
-            cmd_excel_selected=self.on_excel_selected,
             cmd_folder_selected=self.on_folder_selected,
         )
         self.panel_izq.grid(row=0, column=0, rowspan=2, padx=(20, 10), pady=(20, 10), sticky="nsew")
@@ -116,7 +115,6 @@ class BotWizardApp(ctk.CTk):
         import os
         if os.path.exists(settings.INPUT_FILE):
             self.excel_path = str(settings.INPUT_FILE)
-            self.panel_izq.set_excel_path(self.excel_path)
             self.cargar_datos_excel()
 
         if os.path.exists(settings.DOCUMENTS_UPLOAD):
@@ -271,11 +269,6 @@ class BotWizardApp(ctk.CTk):
     # ==========================================
     # CALLBACKS DE SELECCIÓN DE ENTRADAS
     # ==========================================
-
-    def on_excel_selected(self, path):
-        self.excel_path = path
-        self._log(f"Archivo Excel seleccionado: {path}")
-        self.cargar_datos_excel()
 
     def on_folder_selected(self, path):
         self.informes_path = path
