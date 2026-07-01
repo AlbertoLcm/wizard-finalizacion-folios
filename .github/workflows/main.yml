@@ -32,12 +32,12 @@ jobs:
 
     - name: Preparar carpeta de entrega para el usuario
       run: |
-        # Creamos una carpeta limpia para el entregable
-        mkdir entregable
-        # Movemos el .exe generado a la nueva carpeta
-        move dist\main.exe entregable\
-        # Copiamos el archivo Excel desde tu repositorio a la carpeta (Ajusta la ruta de tu Excel aquí)
-        copy "Oficios.xlsx" entregable\
+        # Crear la carpeta
+        New-Item -ItemType Directory -Force -Path entregable
+        # Mover el ejecutable
+        Move-Item -Path dist\main.exe -Destination entregable\
+        # Copiar el Excel usando rutas relativas explícitas
+        Copy-Item -Path .\Oficios.xlsx -Destination entregable\
 
     - name: Guardar el entregable como Artefacto (ZIP)
       uses: actions/upload-artifact@v4
