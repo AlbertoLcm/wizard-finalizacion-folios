@@ -27,11 +27,21 @@ jobs:
 
     - name: Compilar Script con PyInstaller (Imágenes y Playwright)
       run: |
-        # Usamos main.py y copiamos app/assets a la misma ruta dentro del .exe
+        # Compila el ejecutable (se guardará en la carpeta dist/)
         pyinstaller --onefile --noconsole --collect-all playwright --add-data "app/assets;app/assets" main.py
 
-    - name: Guardar el ejecutable como Artefacto
+    - name: Preparar carpeta de entrega para el usuario
+      run: |
+        # Creamos una carpeta limpia para el entregable
+        mkdir wizard-finalizacion-folios
+        # Movemos el .exe generado a la nueva carpeta
+        move dist\main.exe wizard-finalizacion-folios\
+        # Copiamos el archivo Excel desde tu repositorio a la carpeta (Ajusta la ruta de tu Excel aquí)
+        copy "Oficios.xlsx" wizard-finalizacion-folios\
+
+    - name: Guardar el wizard-finalizacion-folios como Artefacto (ZIP)
       uses: actions/upload-artifact@v4
       with:
-        name: bot-wizard-exe
-        path: dist/main.exe
+        name: wizard-finalizacion-folios
+        # Apuntamos a la carpeta completa en lugar de solo al .exe
+        path: wizard-finalizacion-folios/
