@@ -101,7 +101,7 @@ class PanelControls(ctk.CTkFrame):
 
         ctk.CTkLabel(
             self.frame_headless,
-            text=" 🖥️  Modo Oculto (RPA)",
+            text=" Modo Oculto (RPA)",
             font=ctk.CTkFont(size=12, weight="bold"),
             text_color=settings.COLOR_ELECTRIC
         ).pack(side="left", padx=(10, 4), pady=8)
