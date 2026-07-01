@@ -32,16 +32,16 @@ jobs:
 
     - name: Preparar carpeta de entrega para el usuario
       run: |
-        # Creamos una carpeta limpia para el entregable
-        mkdir wizard-finalizacion-folios
-        # Movemos el .exe generado a la nueva carpeta
-        move dist\main.exe wizard-finalizacion-folios\
-        # Copiamos el archivo Excel desde tu repositorio a la carpeta (Ajusta la ruta de tu Excel aquí)
-        copy "Oficios.xlsx" wizard-finalizacion-folios\
+        # Crear la carpeta
+        New-Item -ItemType Directory -Force -Path entregable
+        # Mover el ejecutable
+        Move-Item -Path dist\main.exe -Destination entregable\
+        # Copiar el Excel usando rutas relativas explícitas
+        Copy-Item -Path .\Oficios.xlsx -Destination entregable\
 
-    - name: Guardar el wizard-finalizacion-folios como Artefacto (ZIP)
+    - name: Guardar el entregable como Artefacto (ZIP)
       uses: actions/upload-artifact@v4
       with:
         name: wizard-finalizacion-folios
         # Apuntamos a la carpeta completa en lugar de solo al .exe
-        path: wizard-finalizacion-folios/
+        path: entregable/
