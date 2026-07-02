@@ -1,6 +1,5 @@
 import customtkinter as ctk
 from tkinter import ttk
-import tkinter as tk
 from app.config import settings
 
 class PanelGrid(ctk.CTkFrame):
@@ -173,8 +172,15 @@ class PanelGrid(ctk.CTkFrame):
         self.card_procesados.configure(text=str(procesados))
         self.card_errores.configure(text=str(errores))
 
-    def cargar_datos(self, df):
-        """Limpia la tabla anterior y carga el DataFrame de pandas."""
+    def cargar_datos(self, df, col_status: str = None):
+        """Limpia la tabla anterior y carga el DataFrame de pandas.
+        
+        Args:
+            df:         DataFrame con los datos a mostrar.
+            col_status: nombre exacto de la columna de estado a mostrar en la
+                        columna "Estatus" del grid. Si se omite, se infiere
+                        buscando columnas que contengan 'status' o 'estatus'.
+        """
         self.limpiar_tabla()
 
         if df is None or df.empty:
@@ -185,18 +191,23 @@ class PanelGrid(ctk.CTkFrame):
         total_filas = len(df)
         self.lbl_count.configure(text=f"{total_filas} registros")
 
-        # Determinar qué columna contiene el estatus
-        col_status = "Status Asignacion" if "Status Asignacion" in df.columns else "Status SUGO"
-        if col_status not in df.columns:
-            status_cols = [c for c in df.columns if "status" in c.lower() or "estatus" in c.lower()]
-            col_status = status_cols[0] if status_cols else None
+        # Resolver columna de estatus
+        if col_status and col_status in df.columns:
+            col_status_real = col_status
+        else:
+            # Fallback: buscar cualquier columna que parezca de estatus
+            status_cols = [
+                c for c in df.columns
+                if "status" in c.lower() or "estatus" in c.lower()
+            ]
+            col_status_real = status_cols[0] if status_cols else None
 
         for idx, row in df.iterrows():
             val_sugo = str(row.get("Folio Sugo", "")).strip()
             val_wizard = str(row.get("Folio Wizard", "")).strip()
             val_tipo = str(row.get("Tipo Respuesta", "")).strip()
             val_informe = str(row.get("Informe", "")).strip()
-            val_status = str(row.get(col_status, "Pendiente")).strip() if col_status else "Pendiente"
+            val_status = str(row.get(col_status_real, "Pendiente")).strip() if col_status_real else "Pendiente"
 
             if val_sugo.endswith(".0"): val_sugo = val_sugo[:-2]
             if val_wizard.endswith(".0"): val_wizard = val_wizard[:-2]

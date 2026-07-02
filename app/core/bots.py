@@ -31,10 +31,13 @@ async def autenticar_google(log_callback: Optional[Callable] = None):
             channel="chrome",
             args=obtener_argumentos_navegador()
         )
-        page = context.pages[0] if context.pages else await context.new_page()
-        await page.goto("https://drive.google.com")
-        _log("Navegador abierto. Inicia sesión y cierra la ventana del navegador cuando termines.", success=True)
-        await page.wait_for_event("close", timeout=120_000)
+        try:
+            page = context.pages[0] if context.pages else await context.new_page()
+            await page.goto("https://drive.google.com")
+            _log("Navegador abierto. Inicia sesión y cierra la ventana del navegador cuando termines.", success=True)
+            await page.wait_for_event("close", timeout=120_000)
+        finally:
+            await context.close()
 
 
 def preparar_entorno():
@@ -48,8 +51,24 @@ def preparar_entorno():
         Path(carpeta).mkdir(parents=True, exist_ok=True)
 
 
-def cargar_datos(columnas_requeridas, columna_status_asignacion, columna_status_informe, excel_path: Optional[str] = None, progreso_file: Optional[str] = None, log_callback: Optional[Callable] = None):
-    """Carga el progreso o el archivo inicial de forma genérica."""
+def cargar_datos(
+    columnas_requeridas,
+    col_status: str,
+    excel_path: Optional[str] = None,
+    progreso_file: Optional[str] = None,
+    log_callback: Optional[Callable] = None,
+):
+    """
+    Carga el progreso o el archivo inicial de forma genérica.
+
+    Args:
+        columnas_requeridas: columnas mínimas que debe tener el Excel de entrada.
+        col_status:          columna de status de la tarea actual; se inicializa
+                             con "Pendiente" solo si no existe ya en el CSV/Excel.
+        excel_path:          ruta del Excel de entrada (usa settings.INPUT_FILE si None).
+        progreso_file:       ruta del CSV de progreso (se calcula automáticamente si None).
+        log_callback:        función de log opcional.
+    """
     def _log(msg, **kw):
         if log_callback:
             log_callback(msg, **kw)
@@ -57,7 +76,7 @@ def cargar_datos(columnas_requeridas, columna_status_asignacion, columna_status_
             print(msg)
 
     ruta_excel = excel_path if excel_path else settings.INPUT_FILE
-    
+
     if not progreso_file:
         if ruta_excel:
             excel_name = Path(ruta_excel).stem
@@ -69,6 +88,9 @@ def cargar_datos(columnas_requeridas, columna_status_asignacion, columna_status_
         _log(f"Progreso previo encontrado. Continuando desde {progreso_file}...", success=True)
         df = pd.read_csv(progreso_file)
         if set(columnas_requeridas).issubset(df.columns):
+            # Asegurar que la columna de la tarea actual exista sin sobrescribir
+            if col_status not in df.columns:
+                df[col_status] = "Pendiente"
             return df
         _log("El archivo de progreso no tiene las columnas necesarias. Cargando original...", warning=True)
 
@@ -80,8 +102,9 @@ def cargar_datos(columnas_requeridas, columna_status_asignacion, columna_status_
     if not set(columnas_requeridas).issubset(df.columns):
         _log(f"El Excel debe contener las columnas: {', '.join(columnas_requeridas)}", error=True)
         return None
-    df[columna_status_asignacion] = "Pendiente"
-    df[columna_status_informe] = "Pendiente"
+
+    # Inicializar solo la columna de la tarea actual
+    df[col_status] = "Pendiente"
 
     return df
 
@@ -127,7 +150,12 @@ async def sugo_login(browser, user, password, log_callback: Optional[Callable] =
         return None
     
 
-async def sugo_cierre_operaciones_asig_juridico(datos: dict, page: Page, informes_dir: Optional[str] = None):
+async def sugo_cierre_operaciones_asig_juridico(datos: dict, page: Page, informes_dir: Optional[str] = None, log_callback: Optional[Callable] = None):
+    def _log(msg, **kw):
+        if log_callback:
+            log_callback(msg, **kw)
+        else:
+            print(msg)
     folio_sugo = str(datos.get("Folio Sugo", "")).strip()
     archivo = str(datos.get("Informe", "")).strip()
 
@@ -180,7 +208,7 @@ async def sugo_cierre_operaciones_asig_juridico(datos: dict, page: Page, informe
 
         try:
             await pagina_upload.wait_for_event("close", timeout=10000)
-        except:
+        except Exception:
             if not pagina_upload.is_closed():
                 await pagina_upload.close()
 
@@ -199,12 +227,14 @@ async def sugo_cierre_operaciones_asig_juridico(datos: dict, page: Page, informe
                 await page.click("#BTACEPTAR")
 
         except Exception as e_inner:
-            print(f"No se pudo interactuar con el modal de error: {e_inner}")
+            _log(f"No se pudo interactuar con el modal de error: {e_inner}", warning=True)
             await page.goto(settings.URL_CIERRE_OPERACIONES, wait_until="domcontentloaded")
 
+        _log(f"Error SUGO Informe: {texto_error_sistema}", error=True)
         return "Error"
 
     except Exception as e:
+        _log(f"Error inesperado en SUGO Informe: {e}", error=True)
         await page.goto(settings.URL_CIERRE_OPERACIONES, wait_until="domcontentloaded")
         return "Error"
 
@@ -215,21 +245,26 @@ async def sugo_cierre_operaciones_asig_juridico(datos: dict, page: Page, informe
             try:
                 if not pagina_upload.is_closed():
                     await pagina_upload.close()
-            except:
+            except Exception:
                 pass
 
         if page_visor:
             try:
                 if not page_visor.is_closed():
                     await page_visor.close()
-            except:
+            except Exception:
                 pass
 
         # Opcional: Volver a poner el foco en la página principal
         await page.bring_to_front()
 
 
-async def sugo_asignacion(folio_sugo, page: Page):
+async def sugo_asignacion(folio_sugo, page: Page, log_callback: Optional[Callable] = None):
+    def _log(msg, **kw):
+        if log_callback:
+            log_callback(msg, **kw)
+        else:
+            print(msg)
     """
         Asignación de folio en SUGO. Gestiona el flujo de asignacion aseguramientos:
         Buscar folio → Seleccionar folio → Confirmar asignación
@@ -297,24 +332,31 @@ async def sugo_asignacion(folio_sugo, page: Page):
                 await page.click("#BTACEPTAR")
 
         except Exception as e_inner:
-            print(f"No se pudo interactuar con el modal de error: {e_inner}")
+            _log(f"No se pudo interactuar con el modal de error: {e_inner}", warning=True)
             await page.goto(settings.URL_ASIGNACION_SUGO, wait_until="domcontentloaded")
 
+        _log(f"Error Asignación SUGO: {texto_error_sistema}", error=True)
         return "Error"
 
     except Exception as e:
+        _log(f"Error inesperado en Asignación SUGO: {e}", error=True)
         await page.goto(settings.URL_ASIGNACION_SUGO, wait_until="domcontentloaded")
         return "Error"
 
     finally:
         try:
             page.remove_listener("dialog", manejar_dialogos)
-        except:
+        except Exception:
             pass
   
 
-async def wizard_finalizacion(datos: dict, page: Page):
-    folio_sugo = str(datos.get("Folio Sugo", "")).strip()
+async def wizard_finalizacion(datos: dict, page: Page, log_callback: Optional[Callable] = None):
+    def _log(msg, **kw):
+        if log_callback:
+            log_callback(msg, **kw)
+        else:
+            print(msg)
+
     folio_wizard = str(datos.get("Folio Wizard")).strip()
     tipo_respuesta = str(datos.get("Tipo Respuesta")).strip().lower()
     selfservice = str(datos.get("Selfservice", "")).strip().lower()
@@ -322,7 +364,7 @@ async def wizard_finalizacion(datos: dict, page: Page):
 
     if not folio_wizard or not tipo_respuesta or not dictamen_wizard:
         return "Folio Wizard o Tipo Respuesta faltante"
-    
+
     if 'ine' in selfservice:
         #TODO: Implementar logica para los INE
         return "Omitido INE"
@@ -338,7 +380,7 @@ async def wizard_finalizacion(datos: dict, page: Page):
         # Validación de resultados
         try:
             await page.locator(".q-tab-panel").get_by_text(folio_wizard).wait_for(timeout=10_000)
-        except:
+        except Exception:
             return "No encontrado"
         
         await asyncio.sleep(1)
@@ -373,7 +415,7 @@ async def wizard_finalizacion(datos: dict, page: Page):
             await page.get_by_role("option", name="Adjuntar Informe y Cierre Jurídico").click()
             await asyncio.sleep(1)
 
-        # Enio de respuesta
+        # Envío de respuesta
         await page.locator(".q-px-lg.q-mb-xl.col-md-3.col-sm-5.col-xs-12.q-mb-lg.field-cell", has_text="Envio de respuesta").click()
         await page.get_by_role("option", name="Automático").click()
         await asyncio.sleep(1)
@@ -385,6 +427,7 @@ async def wizard_finalizacion(datos: dict, page: Page):
         return "Completado"
     
     except Exception as e:
+        _log(f"Error en wizard_finalizacion (folio={folio_wizard}): {e}", error=True)
         return "Error"
 
 
@@ -495,11 +538,10 @@ async def orchestrator(
         excel_name = Path(ruta_excel).stem if ruta_excel else "Oficios"
         progreso_file = Path(ruta_excel).parent / f"{excel_name}_resultados.csv" if ruta_excel else settings.FILE_EXITOS
 
+        # Bug fix: cargar_datos ahora recibe un solo col_status en lugar de dos
         df = cargar_datos(
             cols_necesarias,
-            "Status SUGO Asignacion",
-            "Status WIZARD Finalizacion",
-            "Status SUGO Informe",
+            col_status,
             excel_path,
             progreso_file,
             log_callback,
@@ -507,10 +549,6 @@ async def orchestrator(
         if df is None:
             _log("No se pudo cargar el archivo de datos. Proceso cancelado.", error=True)
             return
-
-        # Asegurar que la columna de status de esta tarea exista en el DataFrame
-        if col_status not in df.columns:
-            df[col_status] = "Pendiente"
 
         pendientes = tarea_cfg["pendiente_fn"](df, col_status)
         total = len(pendientes)
@@ -528,26 +566,22 @@ async def orchestrator(
         async with async_playwright() as p:
 
             # ── Inicialización del navegador (switch por tipo_tarea) ───────────
+            # Bug fix: las claves deben coincidir exactamente con TASK_REGISTRY
             match tipo_tarea:
 
-                case "wizard" | "asignacion":
-                    _log(f"Iniciando navegador (modo_oculto={modo_oculto})...")
+                case "wizard-finalizacion" | "sugo-asignacion":
+                    _log(f"Iniciando navegador con perfil persistente (modo_oculto={modo_oculto})...")
                     context = await p.chromium.launch_persistent_context(
                         user_data_dir=settings.USER_DATA_DIR,
                         channel="chrome",
                         headless=modo_oculto,
                         accept_downloads=True,
-                        args=[
-                            "--disable-blink-features=AutomationControlled",
-                            "--disable-gpu",
-                            "--no-sandbox",
-                            "--window-size=1920,1080",
-                        ],
+                        args=obtener_argumentos_navegador(),
                     )
                     browser = None
 
-                case "sugo":
-                    _log(f"Iniciando navegador para SUGO (modo_oculto={modo_oculto})...")
+                case "sugo-informe":
+                    _log(f"Iniciando navegador para SUGO Informe (modo_oculto={modo_oculto})...")
                     browser = await p.chromium.launch(
                         headless=modo_oculto,
                         channel="chrome",
@@ -584,19 +618,18 @@ async def orchestrator(
                     match tipo_tarea:
 
                         case "wizard-finalizacion":
-                            resultado = await wizard_finalizacion(datos, page)
+                            resultado = await wizard_finalizacion(
+                                datos, page, log_callback=log_callback
+                            )
 
                         case "sugo-asignacion":
-                            resultado = await sugo_asignacion(datos, page)
+                            folio_sugo = str(datos.get("Folio Sugo", "")).strip()
+                            resultado = await sugo_asignacion(folio_sugo, page, log_callback=log_callback)
 
                         case "sugo-informe":
-                            resultado_dict = await sugo_cierre_operaciones_asig_juridico(
-                                datos, page, informes_dir=informes_dir
+                            resultado = await sugo_cierre_operaciones_asig_juridico(
+                                datos, page, informes_dir=informes_dir, log_callback=log_callback
                             )
-                            resultado = resultado_dict.get("Status SUGO Informe", "Error")
-                            motivo = resultado_dict.get("Motivo", "")
-                            if resultado == "ERROR" and motivo:
-                                _log(f"  → Error en folio {folio}: {motivo}", error=True)
 
                         case _:
                             resultado = "Error"

@@ -1,11 +1,13 @@
 import asyncio
+import os
 import threading
+from pathlib import Path
 
 from PIL import Image
 import customtkinter as ctk
 
 from app.config import settings
-from app.core.bots import autenticar_google, orchestrator
+from app.core.bots import autenticar_google, cargar_datos, orchestrator
 
 from app.ui.panel_logs import PanelLogs
 from app.ui.panel_controls import PanelControls
@@ -114,7 +116,6 @@ class BotWizardApp(ctk.CTk):
         self.lbl_brand_right.pack(side="right", padx=20)
 
         # Cargar valores por defecto si existen
-        import os
         if os.path.exists(settings.INPUT_FILE):
             self.excel_path = str(settings.INPUT_FILE)
             self.cargar_datos_excel()
@@ -128,6 +129,13 @@ class BotWizardApp(ctk.CTk):
     # ==========================================
     # HELPERS INTERNOS
     # ==========================================
+
+    def _get_progreso_path(self) -> Path | None:
+        """Devuelve la ruta del CSV de progreso asociado al Excel activo."""
+        if not self.excel_path:
+            return None
+        excel_path_obj = Path(self.excel_path)
+        return excel_path_obj.parent / f"{excel_path_obj.stem}_resultados.csv"
 
     def _log(self, msg, **kwargs):
         """Envía un mensaje al panel de logs de forma thread-safe."""
@@ -185,11 +193,7 @@ class BotWizardApp(ctk.CTk):
             self._log("Por favor, seleccione un archivo Excel de entrada antes de iniciar.", error=True)
             return
 
-        from pathlib import Path
-        import os
-        excel_path_obj = Path(self.excel_path)
-        excel_name = excel_path_obj.stem
-        progreso_file = excel_path_obj.parent / f"{excel_name}_resultados.csv"
+        progreso_file = self._get_progreso_path()
 
         if os.path.exists(progreso_file):
             def on_resume():
@@ -222,7 +226,7 @@ class BotWizardApp(ctk.CTk):
             self._set_ui_bloqueada(True)
 
             coro = orchestrator(
-                tipo_tarea="wizard",
+                tipo_tarea="wizard-finalizacion",
                 modo_oculto=modo_oculto,
                 log_callback=self._log,
                 done_callback=self._on_proceso_terminado,
@@ -235,7 +239,7 @@ class BotWizardApp(ctk.CTk):
         self._verificar_progreso_y_ejecutar(_iniciar_wizard)
 
     def cmd_asignacion(self):
-        """Botón Asignación — Asignación Wizard (proceso de asignación de folios)."""
+        """Botón Asignación — Asignación SUGO de folios."""
         def _iniciar_asignacion():
             modo_oculto = self.panel_izq.get_modo_oculto()
             modo_txt = "oculto (headless)" if modo_oculto else "visible"
@@ -244,7 +248,7 @@ class BotWizardApp(ctk.CTk):
             self._set_ui_bloqueada(True)
 
             coro = orchestrator(
-                tipo_tarea="asignacion",
+                tipo_tarea="sugo-asignacion",
                 modo_oculto=modo_oculto,
                 log_callback=self._log,
                 done_callback=self._on_proceso_terminado,
@@ -270,7 +274,7 @@ class BotWizardApp(ctk.CTk):
                 self._set_estado("Adjuntando informe SUGO...", color=settings.COLOR_CYAN, is_processing=True)
 
                 coro = orchestrator(
-                    tipo_tarea="sugo",
+                    tipo_tarea="sugo-informe",
                     modo_oculto=modo_oculto,
                     log_callback=self._log,
                     done_callback=self._on_proceso_terminado,
@@ -302,28 +306,27 @@ class BotWizardApp(ctk.CTk):
         """Carga el Excel y lo muestra en el panel de grid."""
         if not self.excel_path:
             return
-        
+
         try:
-            col_status = "Status Asignacion"
-            col_informe = "Status Informe"
-            cols_necesarias = ["Folio Sugo", "Folio Wizard", "Tipo Respuesta", "Selfservice", "Dictamen Wizard", "Informe"]
-            
-            from pathlib import Path
-            excel_path_obj = Path(self.excel_path)
-            excel_name = excel_path_obj.stem
-            progreso_file = excel_path_obj.parent / f"{excel_name}_resultados.csv"
-            
-            from app.core.bots import cargar_datos
+            # Columna de status por defecto al cargar desde disco
+            # (se muestra la primera que exista; el orquestador la actualizará en tiempo real)
+            col_status_default = "Status SUGO Asignacion"
+            cols_necesarias = [
+                "Folio Sugo", "Folio Wizard", "Tipo Respuesta",
+                "Selfservice", "Dictamen Wizard", "Informe",
+            ]
+
+            progreso_file = self._get_progreso_path()
+
             df = cargar_datos(
                 columnas_requeridas=cols_necesarias,
-                columna_status_asignacion=col_status,
-                columna_status_informe=col_informe,
+                col_status=col_status_default,
                 excel_path=self.excel_path,
-                progreso_file=str(progreso_file),
-                log_callback=self._log
+                progreso_file=str(progreso_file) if progreso_file else None,
+                log_callback=self._log,
             )
             if df is not None:
-                self.panel_grid.cargar_datos(df)
+                self.panel_grid.cargar_datos(df, col_status=col_status_default)
                 self._log(f"Se cargaron {len(df)} registros en la tabla.", success=True)
             else:
                 self.panel_grid.limpiar_tabla()
