@@ -44,7 +44,8 @@ class BotWizardApp(ctk.CTk):
         )
 
         self.title(settings.APP_TITLE)
-        self.geometry("1200x800")
+        self.geometry("980x620")
+        self.minsize(780, 520)
         self.resizable(True, True)
         self.configure(fg_color=settings.COLOR_SAND)
 
@@ -56,10 +57,10 @@ class BotWizardApp(ctk.CTk):
         # --- INTERFAZ ---
         # ==========================================
 
-        self.grid_columnconfigure(0, weight=3, minsize=350)
-        self.grid_columnconfigure(1, weight=7, minsize=800)
-        self.grid_rowconfigure(0, weight=5, minsize=350) # Grid
-        self.grid_rowconfigure(1, weight=5, minsize=350) # Logs
+        self.grid_columnconfigure(0, weight=3, minsize=280)
+        self.grid_columnconfigure(1, weight=7, minsize=480)
+        self.grid_rowconfigure(0, weight=5, minsize=260) # Grid
+        self.grid_rowconfigure(1, weight=4, minsize=200) # Logs
         self.grid_rowconfigure(2, weight=0)              # Bottom bar
 
         # ==========================================
@@ -74,21 +75,22 @@ class BotWizardApp(ctk.CTk):
             cmd_exit=self.destroy,
             cmd_sugo=self.cmd_sugo,
             cmd_wizard=self.cmd_wizard,
+            cmd_asignacion=self.cmd_asignacion,
             cmd_folder_selected=self.on_folder_selected,
         )
-        self.panel_izq.grid(row=0, column=0, rowspan=2, padx=(20, 10), pady=(20, 10), sticky="nsew")
+        self.panel_izq.grid(row=0, column=0, rowspan=2, padx=(12, 8), pady=(12, 8), sticky="nsew")
 
         # ==========================================
         # --- PANEL DERECHO SUPERIOR (GRID) ---
         # ==========================================
         self.panel_grid = PanelGrid(self)
-        self.panel_grid.grid(row=0, column=1, padx=(10, 20), pady=(20, 10), sticky="nsew")
+        self.panel_grid.grid(row=0, column=1, padx=(8, 12), pady=(12, 6), sticky="nsew")
 
         # ==========================================
         # --- PANEL DERECHO INFERIOR (LOGS) ---
         # ==========================================
         self.panel_logs = PanelLogs(self, icon_trash=self.icon_trash)
-        self.panel_logs.grid(row=1, column=1, padx=(10, 20), pady=(10, 10), sticky="nsew")
+        self.panel_logs.grid(row=1, column=1, padx=(8, 12), pady=(6, 8), sticky="nsew")
 
         # ==========================================
         # --- BARRA INFERIOR (BRANDING) ---
@@ -231,6 +233,28 @@ class BotWizardApp(ctk.CTk):
             self._ejecutar_en_hilo(coro)
 
         self._verificar_progreso_y_ejecutar(_iniciar_wizard)
+
+    def cmd_asignacion(self):
+        """Botón Asignación — Asignación Wizard (proceso de asignación de folios)."""
+        def _iniciar_asignacion():
+            modo_oculto = self.panel_izq.get_modo_oculto()
+            modo_txt = "oculto (headless)" if modo_oculto else "visible"
+            self._log(f"Iniciando proceso de Asignación en modo {modo_txt}...")
+            self._set_estado("Ejecutando Asignación...", color=settings.COLOR_CYAN, is_processing=True)
+            self._set_ui_bloqueada(True)
+
+            coro = orchestrator(
+                tipo_tarea="asignacion",
+                modo_oculto=modo_oculto,
+                log_callback=self._log,
+                done_callback=self._on_proceso_terminado,
+                excel_path=self.excel_path,
+                informes_dir=self.informes_path,
+                status_callback=self._update_row_status,
+            )
+            self._ejecutar_en_hilo(coro)
+
+        self._verificar_progreso_y_ejecutar(_iniciar_asignacion)
 
     def cmd_sugo(self):
         """Botón 3 — Adjuntar Informe SUGO (pide credenciales primero)."""

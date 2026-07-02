@@ -318,6 +318,56 @@ async def finalizacion_wizard(datos: dict, page: Page):
         return "Error"
 
 
+async def asignacion_wizard(datos: dict, page: Page):
+    """Lógica de Asignación en Wizard: asigna el folio al analista correspondiente."""
+    folio_sugo = str(datos.get("Folio Sugo", "")).strip()
+    folio_wizard = str(datos.get("Folio Wizard", "")).strip()
+    tipo_respuesta = str(datos.get("Tipo Respuesta", "")).strip().lower()
+
+    if not folio_wizard:
+        return "Folio Wizard faltante"
+
+    try:
+        await page.goto(settings.URL_WIZARD_MIS_TAREAS, timeout=60000)
+        await asyncio.sleep(3)
+        await page.get_by_role("button", name="Filtros").click()
+        await page.fill("textarea[aria-label='Id solicitud']", folio_wizard)
+        await asyncio.sleep(2)
+        await page.get_by_role("button", name="Buscar").click()
+
+        try:
+            await page.locator(".q-tab-panel").get_by_text(folio_wizard).wait_for(timeout=10_000)
+        except:
+            return "No encontrado"
+
+        await asyncio.sleep(1)
+        await page.locator(".q-tab-panel").get_by_text(folio_wizard).click()
+        await page.get_by_text("Detalle del caso").wait_for(timeout=15_000)
+        await page.get_by_text("Detalle del caso").click()
+
+        # Asignación de tipo de respuesta
+        if 'negativa' in tipo_respuesta:
+            await page.locator(".q-px-lg.q-mb-xl.col-md-3.col-sm-5.col-xs-12.q-mb-lg.field-cell", has_text="Respuesta del oficio").click()
+            await page.get_by_role("option", name="Negativa SITI").click()
+            await asyncio.sleep(1)
+        else:
+            await page.locator(".q-px-lg.q-mb-xl.col-md-3.col-sm-5.col-xs-12.q-mb-lg.field-cell", has_text="Respuesta del oficio").click()
+            await page.get_by_role("option", name="Positiva").click()
+            await asyncio.sleep(1)
+
+        # Guardar sin finalizar
+        guardar_btn = page.get_by_role("button", name="Guardar")
+        if await guardar_btn.is_visible():
+            await guardar_btn.click()
+            await asyncio.sleep(2)
+
+        return "Asignado"
+
+    except Exception as e:
+        print(f"Error en asignación folio {folio_wizard}: {e}")
+        return "Error"
+
+
 async def orchestrator(
     tipo_tarea: str,
     modo_oculto: bool,
@@ -369,6 +419,8 @@ async def orchestrator(
             pendientes = df[df[col_status_asignacion] != "Completado"].index.tolist()
         elif tipo_tarea == "sugo":
             pendientes = df[df[col_status_informe] != "Completado"].index.tolist()
+        elif tipo_tarea == "asignacion":
+            pendientes = df[df[col_status_asignacion].isin(["Pendiente", "Error"])].index.tolist()
 
         total = len(pendientes)
         _log(f"Folios pendientes a procesar: {total}")
@@ -424,7 +476,9 @@ async def orchestrator(
 
                     if tipo_tarea == "wizard":
                         resultado = await finalizacion_wizard(datos, page)
-
+                        df.at[idx, col_status_asignacion] = resultado
+                    elif tipo_tarea == "asignacion":
+                        resultado = await asignacion_wizard(datos, page)
                         df.at[idx, col_status_asignacion] = resultado
                     else:
                         resultado_dict = await cierre_operaciones_asig_juridico(datos, page, informes_dir=informes_dir)
