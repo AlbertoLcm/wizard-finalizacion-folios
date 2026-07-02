@@ -164,7 +164,7 @@ async def sugo_cierre_operaciones_asig_juridico(datos: dict, page: Page, informe
         return "Folio Sugo o Informe faltante"
 
     if not fecha_cierre:
-        fecha_cierre = datetime.now().strftime("%d/%m/%Y")
+        fecha_cierre = datetime.datetime.now().strftime("%d/%m/%Y")
 
     pagina_upload = None
     page_visor = None
@@ -380,7 +380,7 @@ async def wizard_finalizacion(datos: dict, page: Page, log_callback: Optional[Ca
         await page.goto(settings.URL_WIZARD_MIS_TAREAS, timeout=80_000)
         await asyncio.sleep(3)
         await page.get_by_role("button", name="Filtros").click()
-        await page.sleep(1)
+        await asyncio.sleep(1)
         await page.fill("textarea[aria-label='Id solicitud']", folio_wizard)
         await asyncio.sleep(2)
         await page.get_by_role("button", name="Buscar").click()
@@ -577,7 +577,7 @@ async def orchestrator(
             # Bug fix: las claves deben coincidir exactamente con TASK_REGISTRY
             match tipo_tarea:
 
-                case "wizard-finalizacion" | "sugo-asignacion":
+                case "wizard-finalizacion":
                     _log(f"Iniciando navegador con perfil persistente (modo_oculto={modo_oculto})...")
                     context = await p.chromium.launch_persistent_context(
                         user_data_dir=settings.USER_DATA_DIR,
@@ -588,7 +588,7 @@ async def orchestrator(
                     )
                     browser = None
 
-                case "sugo-informe":
+                case "sugo-informe" | "sugo-asignacion":
                     _log(f"Iniciando navegador para SUGO Informe (modo_oculto={modo_oculto})...")
                     browser = await p.chromium.launch(
                         headless=modo_oculto,
