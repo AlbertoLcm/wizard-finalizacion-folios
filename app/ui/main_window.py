@@ -54,6 +54,9 @@ class BotWizardApp(ctk.CTk):
         # Variables de estado
         self.excel_path = None
         self.informes_path = None
+        # Columna de status del proceso actualmente en ejecución
+        # (determina qué columna de la tabla se resalta y cuenta en las tarjetas)
+        self._col_status_activa: str | None = None
 
         # ==========================================
         # --- INTERFAZ ---
@@ -219,11 +222,13 @@ class BotWizardApp(ctk.CTk):
     def cmd_wizard(self):
         """Botón 2 — Cierre Folio Wizard."""
         def _iniciar_wizard():
+            self._col_status_activa = "Status WIZARD Finalizacion"
             modo_oculto = self.panel_izq.get_modo_oculto()
             modo_txt = "oculto (headless)" if modo_oculto else "visible"
             self._log(f"Iniciando Cierre Folio Wizard en modo {modo_txt}...")
             self._set_estado("Ejecutando Wizard...", color=settings.COLOR_CYAN, is_processing=True)
             self._set_ui_bloqueada(True)
+            self.after(0, lambda: self.panel_grid.set_col_status_activa(self._col_status_activa))
 
             coro = orchestrator(
                 tipo_tarea="wizard-finalizacion",
@@ -241,11 +246,13 @@ class BotWizardApp(ctk.CTk):
     def cmd_asignacion(self):
         """Botón Asignación — Asignación SUGO de folios."""
         def _iniciar_asignacion():
+            self._col_status_activa = "Status SUGO Asignacion"
             modo_oculto = self.panel_izq.get_modo_oculto()
             modo_txt = "oculto (headless)" if modo_oculto else "visible"
             self._log(f"Iniciando proceso de Asignación en modo {modo_txt}...")
             self._set_estado("Ejecutando Asignación...", color=settings.COLOR_CYAN, is_processing=True)
             self._set_ui_bloqueada(True)
+            self.after(0, lambda: self.panel_grid.set_col_status_activa(self._col_status_activa))
 
             coro = orchestrator(
                 tipo_tarea="sugo-asignacion",
@@ -268,10 +275,12 @@ class BotWizardApp(ctk.CTk):
             self._set_ui_bloqueada(True)
 
             def _on_credenciales_ok(user: str, password: str):
+                self._col_status_activa = "Status SUGO Informe"
                 modo_oculto = self.panel_izq.get_modo_oculto()
                 modo_txt = "oculto (headless)" if modo_oculto else "visible"
                 self._log(f"Credenciales recibidas. Iniciando SUGO en modo {modo_txt}...")
                 self._set_estado("Adjuntando informe SUGO...", color=settings.COLOR_CYAN, is_processing=True)
+                self.after(0, lambda: self.panel_grid.set_col_status_activa(self._col_status_activa))
 
                 coro = orchestrator(
                     tipo_tarea="sugo-informe",
@@ -336,4 +345,5 @@ class BotWizardApp(ctk.CTk):
 
     def _update_row_status(self, idx, status):
         """Actualiza el estatus de la fila en la tabla de forma segura en el hilo principal."""
-        self.after(0, lambda: self.panel_grid.actualizar_estatus(idx, status))
+        col = self._col_status_activa
+        self.after(0, lambda: self.panel_grid.actualizar_estatus(idx, status, col_status=col))

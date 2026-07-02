@@ -126,6 +126,19 @@ class PanelGrid(ctk.CTkFrame):
         self.tree.tag_configure("status_error", foreground="#991B1B", background="#FEF2F2")
         self.tree.tag_configure("status_warning", foreground="#92400E", background="#FEF3C7")
 
+        # Mapeo: clave de tarea → índice de columna en la tabla
+        # Los índices corresponden a la posición en column_ids:
+        #   0=folio_sugo, 1=folio_wizard, 2=tipo_respuesta, 3=informe,
+        #   4=[ASIGNACION], 5=[FINALIZACION], 6=[INFORME]
+        self.STATUS_COL_MAP = {
+            "Status SUGO Asignacion":     4,
+            "Status WIZARD Finalizacion": 5,
+            "Status SUGO Informe":        6,
+        }
+
+        # Columna activa que se usa para las tarjetas de estadísticas
+        self.col_status_activa: str | None = None
+
         # Mapeo de índices de fila a ID del item del Treeview
         self.row_items = {}
 
@@ -151,38 +164,48 @@ class PanelGrid(ctk.CTkFrame):
         return lbl_val
 
     def recalcular_estadisticas(self):
-        """Calcula el total de filas, pendientes, procesados y errores, y actualiza las tarjetas."""
+        """Calcula total, pendientes, procesados y errores sobre la columna de status activa."""
         total = 0
         pendientes = 0
         procesados = 0
         errores = 0
-        
+
+        # Determinar qué índice de columna usar para las estadísticas
+        idx_stat = None
+        if self.col_status_activa and self.col_status_activa in self.STATUS_COL_MAP:
+            idx_stat = self.STATUS_COL_MAP[self.col_status_activa]
+
         for item in self.tree.get_children():
             total += 1
-            valores = self.tree.item(item, "values")
-            if len(valores) > 4:
-                status = str(valores[4]).lower()
-                if "pendiente" in status:
-                    pendientes += 1
-                elif "error" in status:
-                    errores += 1
+            if idx_stat is not None:
+                valores = self.tree.item(item, "values")
+                if len(valores) > idx_stat:
+                    status = str(valores[idx_stat]).lower()
+                    if "pendiente" in status or status == "":
+                        pendientes += 1
+                    elif "error" in status:
+                        errores += 1
+                    else:
+                        procesados += 1
                 else:
-                    procesados += 1
-                    
+                    pendientes += 1
+
         self.card_total.configure(text=str(total))
         self.card_pendientes.configure(text=str(pendientes))
         self.card_procesados.configure(text=str(procesados))
         self.card_errores.configure(text=str(errores))
 
     def cargar_datos(self, df, col_status: str = None):
-        """Limpia la tabla anterior y carga el DataFrame de pandas.
-        
+        """Limpia la tabla y carga el DataFrame.
+
         Args:
-            df:         DataFrame con los datos a mostrar.
-            col_status: nombre exacto de la columna de estado a mostrar en la
-                        columna "Estatus" del grid. Si se omite, se infiere
-                        buscando columnas que contengan 'status' o 'estatus'.
+            df:         DataFrame con los datos.
+            col_status: columna de status que se marca como "activa" para las
+                        tarjetas de estadísticas. Las tres columnas de status
+                        se cargan siempre si existen en el DataFrame.
         """
+        # Guardar columna activa para estadísticas
+        self.col_status_activa = col_status
         self.limpiar_tabla()
 
         if df is None or df.empty:
@@ -193,63 +216,80 @@ class PanelGrid(ctk.CTkFrame):
         total_filas = len(df)
         self.lbl_count.configure(text=f"{total_filas} registros")
 
-        # Resolver columna de estatus
-        if col_status and col_status in df.columns:
-            col_status_real = col_status
-        else:
-            # Fallback: buscar cualquier columna que parezca de estatus
-            status_cols = [
-                c for c in df.columns
-                if "status" in c.lower() or "estatus" in c.lower()
-            ]
-            col_status_real = status_cols[0] if status_cols else None
+        # Nombre de las 3 columnas de status en el DataFrame
+        COL_ASIG = "Status SUGO Asignacion"
+        COL_FINAL = "Status WIZARD Finalizacion"
+        COL_INF = "Status SUGO Informe"
 
         for idx, row in df.iterrows():
-            val_sugo = str(row.get("Folio Sugo", "")).strip()
+            val_sugo   = str(row.get("Folio Sugo", "")).strip()
             val_wizard = str(row.get("Folio Wizard", "")).strip()
-            val_tipo = str(row.get("Tipo Respuesta", "")).strip()
+            val_tipo   = str(row.get("Tipo Respuesta", "")).strip()
             val_informe = str(row.get("Informe", "")).strip()
-            val_status = str(row.get(col_status_real, "Pendiente")).strip() if col_status_real else "Pendiente"
 
-            if val_sugo.endswith(".0"): val_sugo = val_sugo[:-2]
+            # Leer los 3 status independientemente
+            val_asig  = str(row.get(COL_ASIG,  "Pendiente")).strip() if COL_ASIG  in df.columns else ""
+            val_final = str(row.get(COL_FINAL, "Pendiente")).strip() if COL_FINAL in df.columns else ""
+            val_inf   = str(row.get(COL_INF,   "Pendiente")).strip() if COL_INF   in df.columns else ""
+
+            if val_sugo.endswith(".0"):   val_sugo   = val_sugo[:-2]
             if val_wizard.endswith(".0"): val_wizard = val_wizard[:-2]
 
-            # Insertar registro en el Treeview
             item_id = self.tree.insert(
-                "",
-                "end",
-                values=(val_sugo, val_wizard, val_tipo, val_informe, val_status)
+                "", "end",
+                values=(val_sugo, val_wizard, val_tipo, val_informe,
+                        val_asig, val_final, val_inf)
             )
 
-            # Guardar referencia
             self.row_items[idx] = item_id
 
-            # Aplicar estilo de fila según estatus inicial
-            self._aplicar_estilo_fila(item_id, idx, val_status)
-            
+            # El color de fila refleja el status de la columna activa
+            status_fila = {
+                COL_ASIG: val_asig, COL_FINAL: val_final, COL_INF: val_inf
+            }.get(col_status, val_asig or val_final or val_inf)
+            self._aplicar_estilo_fila(item_id, idx, status_fila)
+
         self.recalcular_estadisticas()
 
-    def actualizar_estatus(self, row_index, nuevo_estatus):
-        """Actualiza el estatus de una fila específica en tiempo real."""
-        if row_index in self.row_items:
-            item_id = self.row_items[row_index]
-            
-            # Obtener valores actuales y actualizar la columna estatus (índice 4)
-            valores = list(self.tree.item(item_id, "values"))
+    def actualizar_estatus(self, row_index, nuevo_estatus, col_status: str = None):
+        """Actualiza el estatus de una fila en tiempo real.
+
+        Args:
+            row_index:    índice pandas de la fila.
+            nuevo_estatus: valor del nuevo status.
+            col_status:   nombre de la columna de status a actualizar
+                          (p.ej. 'Status SUGO Asignacion'). Si None, se usa
+                          la columna activa registrada en cargar_datos.
+        """
+        if row_index not in self.row_items:
+            return
+
+        item_id = self.row_items[row_index]
+
+        # Resolver qué columna actualizar
+        col = col_status or self.col_status_activa
+        col_idx = self.STATUS_COL_MAP.get(col) if col else None
+
+        valores = list(self.tree.item(item_id, "values"))
+
+        # Asegurar que la lista tenga al menos 7 elementos
+        while len(valores) < 7:
+            valores.append("")
+
+        if col_idx is not None:
+            valores[col_idx] = nuevo_estatus
+        else:
+            # Fallback: actualizar la primera columna de status (índice 4)
             valores[4] = nuevo_estatus
-            self.tree.item(item_id, values=valores)
-            
-            # Re-aplicar estilo
-            self._aplicar_estilo_fila(item_id, row_index, nuevo_estatus)
-            
-            # Auto-scroll para que el elemento sea visible
-            self.tree.see(item_id)
-            
-            # Seleccionar la fila activa
-            self.tree.selection_set(item_id)
-            
-            # Actualizar tarjetas de estadísticas
-            self.recalcular_estadisticas()
+
+        self.tree.item(item_id, values=valores)
+
+        # Color de fila según el status que se está actualizando
+        self._aplicar_estilo_fila(item_id, row_index, nuevo_estatus)
+
+        self.tree.see(item_id)
+        self.tree.selection_set(item_id)
+        self.recalcular_estadisticas()
 
     def _aplicar_estilo_fila(self, item_id, row_index, status):
         """Asigna los tags de estilo correspondientes según el estatus del folio."""
@@ -269,6 +309,15 @@ class PanelGrid(ctk.CTkFrame):
             tag = "evenrow" if row_index % 2 == 0 else "oddrow"
             
         self.tree.item(item_id, tags=(tag,))
+
+    def set_col_status_activa(self, col_status: str):
+        """Cambia la columna de status activa para las tarjetas de estadísticas.
+
+        Se llama desde main_window cuando el usuario inicia un proceso,
+        para que las tarjetas cuenten sobre la columna correcta.
+        """
+        self.col_status_activa = col_status
+        self.recalcular_estadisticas()
 
     def limpiar_tabla(self):
         """Elimina todas las filas de la tabla."""
