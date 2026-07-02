@@ -85,8 +85,12 @@ def cargar_datos(columnas_requeridas, columna_status_asignacion, columna_status_
 
     return df
 
+# =========================================
+# Funciones de ejecución de procesos
+# =========================================
 
-async def manejar_login_intranet(browser, user, password, log_callback: Optional[Callable] = None):
+
+async def sugo_login(browser, user, password, log_callback: Optional[Callable] = None):
     """Encapsula la lógica de autenticación en SUGO/Intranet."""
     def _log(msg, **kw):
         if log_callback:
@@ -123,7 +127,7 @@ async def manejar_login_intranet(browser, user, password, log_callback: Optional
         return None
     
 
-async def cierre_operaciones_asig_juridico(datos: dict, page: Page, informes_dir: Optional[str] = None):
+async def sugo_cierre_operaciones_asig_juridico(datos: dict, page: Page, informes_dir: Optional[str] = None):
     folio_sugo = str(datos.get("Folio Sugo", "")).strip()
     archivo = str(datos.get("Informe", "")).strip()
 
@@ -240,7 +244,57 @@ async def cierre_operaciones_asig_juridico(datos: dict, page: Page, informes_dir
         await page.bring_to_front()
 
 
-async def finalizacion_wizard(datos: dict, page: Page):
+async def sugo_asignacion(datos: dict, page: Page):
+    """Lógica de Asignación en Wizard: asigna el folio al analista correspondiente."""
+    folio_sugo = str(datos.get("Folio Sugo", "")).strip()
+    folio_wizard = str(datos.get("Folio Wizard", "")).strip()
+    tipo_respuesta = str(datos.get("Tipo Respuesta", "")).strip().lower()
+
+    if not folio_wizard:
+        return "Folio Wizard faltante"
+
+    try:
+        await page.goto(settings.URL_WIZARD_MIS_TAREAS, timeout=60000)
+        await asyncio.sleep(3)
+        await page.get_by_role("button", name="Filtros").click()
+        await page.fill("textarea[aria-label='Id solicitud']", folio_wizard)
+        await asyncio.sleep(2)
+        await page.get_by_role("button", name="Buscar").click()
+
+        try:
+            await page.locator(".q-tab-panel").get_by_text(folio_wizard).wait_for(timeout=10_000)
+        except:
+            return "No encontrado"
+
+        await asyncio.sleep(1)
+        await page.locator(".q-tab-panel").get_by_text(folio_wizard).click()
+        await page.get_by_text("Detalle del caso").wait_for(timeout=15_000)
+        await page.get_by_text("Detalle del caso").click()
+
+        # Asignación de tipo de respuesta
+        if 'negativa' in tipo_respuesta:
+            await page.locator(".q-px-lg.q-mb-xl.col-md-3.col-sm-5.col-xs-12.q-mb-lg.field-cell", has_text="Respuesta del oficio").click()
+            await page.get_by_role("option", name="Negativa SITI").click()
+            await asyncio.sleep(1)
+        else:
+            await page.locator(".q-px-lg.q-mb-xl.col-md-3.col-sm-5.col-xs-12.q-mb-lg.field-cell", has_text="Respuesta del oficio").click()
+            await page.get_by_role("option", name="Positiva").click()
+            await asyncio.sleep(1)
+
+        # Guardar sin finalizar
+        guardar_btn = page.get_by_role("button", name="Guardar")
+        if await guardar_btn.is_visible():
+            await guardar_btn.click()
+            await asyncio.sleep(2)
+
+        return "Asignado"
+
+    except Exception as e:
+        print(f"Error en asignación folio {folio_wizard}: {e}")
+        return "Error"
+
+
+async def wizard_finalizacion(datos: dict, page: Page):
     folio_sugo = str(datos.get("Folio Sugo", "")).strip()
     folio_wizard = str(datos.get("Folio Wizard")).strip()
     tipo_respuesta = str(datos.get("Tipo Respuesta")).strip().lower()
@@ -317,54 +371,48 @@ async def finalizacion_wizard(datos: dict, page: Page):
         return "Error"
 
 
-async def asignacion_wizard(datos: dict, page: Page):
-    """Lógica de Asignación en Wizard: asigna el folio al analista correspondiente."""
-    folio_sugo = str(datos.get("Folio Sugo", "")).strip()
-    folio_wizard = str(datos.get("Folio Wizard", "")).strip()
-    tipo_respuesta = str(datos.get("Tipo Respuesta", "")).strip().lower()
+# =========================================
+# Orchestrator
+# =========================================
 
-    if not folio_wizard:
-        return "Folio Wizard faltante"
-
-    try:
-        await page.goto(settings.URL_WIZARD_MIS_TAREAS, timeout=60000)
-        await asyncio.sleep(3)
-        await page.get_by_role("button", name="Filtros").click()
-        await page.fill("textarea[aria-label='Id solicitud']", folio_wizard)
-        await asyncio.sleep(2)
-        await page.get_by_role("button", name="Buscar").click()
-
-        try:
-            await page.locator(".q-tab-panel").get_by_text(folio_wizard).wait_for(timeout=10_000)
-        except:
-            return "No encontrado"
-
-        await asyncio.sleep(1)
-        await page.locator(".q-tab-panel").get_by_text(folio_wizard).click()
-        await page.get_by_text("Detalle del caso").wait_for(timeout=15_000)
-        await page.get_by_text("Detalle del caso").click()
-
-        # Asignación de tipo de respuesta
-        if 'negativa' in tipo_respuesta:
-            await page.locator(".q-px-lg.q-mb-xl.col-md-3.col-sm-5.col-xs-12.q-mb-lg.field-cell", has_text="Respuesta del oficio").click()
-            await page.get_by_role("option", name="Negativa SITI").click()
-            await asyncio.sleep(1)
-        else:
-            await page.locator(".q-px-lg.q-mb-xl.col-md-3.col-sm-5.col-xs-12.q-mb-lg.field-cell", has_text="Respuesta del oficio").click()
-            await page.get_by_role("option", name="Positiva").click()
-            await asyncio.sleep(1)
-
-        # Guardar sin finalizar
-        guardar_btn = page.get_by_role("button", name="Guardar")
-        if await guardar_btn.is_visible():
-            await guardar_btn.click()
-            await asyncio.sleep(2)
-
-        return "Asignado"
-
-    except Exception as e:
-        print(f"Error en asignación folio {folio_wizard}: {e}")
-        return "Error"
+# ── Registro declarativo de tareas ────────────────────────────────────────────
+# Para agregar una nueva tarea a futuro, añade una entrada aquí con:
+#   col_status   → columna del Excel/CSV donde se escribe el resultado por folio
+#   pendiente_fn → función(df, col) → lista de índices aún sin procesar
+#   requiere_sugo → True si el proceso necesita credenciales de Intranet
+#
+# El handler real se resuelve en el match/case dentro de orchestrator para que
+# cada caso pueda recibir parámetros propios (p.ej. informes_dir).
+# ─────────────────────────────────────────────────────────────────────────────
+TASK_REGISTRY: dict = {
+    "sugo-asignacion": {
+        "col_status": "Status SUGO Asignacion",
+        "pendiente_fn": lambda df, col: df[
+            df[col].isin(["Pendiente", "Error"])
+        ].index.tolist(),
+        "requiere_sugo": False,
+    },
+    "wizard-finalizacion": {
+        "col_status": "Status WIZARD Finalizacion",
+        "pendiente_fn": lambda df, col: df[
+            ~df[col].isin(["Completado", "Omitido INE"])
+        ].index.tolist(),
+        "requiere_sugo": False,
+    },
+    "sugo-informe": {
+        "col_status": "Status SUGO Informe",
+        "pendiente_fn": lambda df, col: df[
+            ~df[col].isin(["OK", "Completado"])
+        ].index.tolist(),
+        "requiere_sugo": True,
+    },
+    # ── Punto de extensión: agrega nuevas tareas aquí ─────────────────────────
+    # "nueva_tarea": {
+    #     "col_status": "Status Nueva Tarea",
+    #     "pendiente_fn": lambda df, col: df[df[col] == "Pendiente"].index.tolist(),
+    #     "requiere_sugo": False,
+    # },
+}
 
 
 async def orchestrator(
@@ -379,18 +427,25 @@ async def orchestrator(
     status_callback: Optional[Callable[[int, str], None]] = None,
 ):
     """
-    Orquestador único para ambas tareas RPA.
+    Orquestador único para todas las tareas RPA.
+
+    El tipo de tarea se resuelve mediante TASK_REGISTRY (datos) +
+    match/case (lógica de navegador y handler). Para añadir una nueva
+    tarea basta con:
+      1. Registrarla en TASK_REGISTRY.
+      2. Añadir un case en el bloque de inicialización del navegador.
+      3. Añadir un case en el bloque de despacho del handler.
 
     Args:
-        tipo_tarea:    'wizard' | 'sugo'
-        modo_oculto:   True = headless (sin ventana de navegador)
-        log_callback:  función(msg, *, success, error, warning) para enviar logs a la UI
-        done_callback: función() llamada al finalizar (exitoso o con error)
-        user:          usuario de Intranet (solo para tipo_tarea='sugo')
-        password:      contraseña de Intranet (solo para tipo_tarea='sugo')
-        excel_path:    ruta del archivo Excel de entrada
-        informes_dir:  ruta del directorio de informes a cargar
-        status_callback: función(row_index, status) para actualizar el estado visual de cada fila
+        tipo_tarea:      clave en TASK_REGISTRY ('wizard' | 'sugo' | 'asignacion' | ...)
+        modo_oculto:     True = headless (sin ventana de navegador)
+        log_callback:    función(msg, *, success, error, warning) para enviar logs a la UI
+        done_callback:   función() llamada al finalizar (exitoso o con error)
+        user:            usuario de Intranet (solo si requiere_sugo=True)
+        password:        contraseña de Intranet (solo si requiere_sugo=True)
+        excel_path:      ruta del archivo Excel de entrada
+        informes_dir:    ruta del directorio de informes a cargar (tarea 'sugo')
+        status_callback: función(row_index, status) para actualizar el estado visual por fila
     """
     def _log(msg, **kw):
         if log_callback:
@@ -401,26 +456,46 @@ async def orchestrator(
     try:
         preparar_entorno()
 
-        col_status_asignacion = "Status Asignacion"
-        col_status_informe = "Status Informe"
-        cols_necesarias = ["Folio Sugo", "Folio Wizard", "Tipo Respuesta", "Selfservice", "Dictamen Wizard", "Informe"]
+        # ── Validar que el tipo de tarea sea conocido ─────────────────────────
+        if tipo_tarea not in TASK_REGISTRY:
+            _log(
+                f"Tipo de tarea desconocido: '{tipo_tarea}'. "
+                f"Tareas disponibles: {list(TASK_REGISTRY)}",
+                error=True,
+            )
+            return
+
+        tarea_cfg = TASK_REGISTRY[tipo_tarea]
+        col_status = tarea_cfg["col_status"]
+
+        # Columnas mínimas requeridas en el Excel de entrada
+        cols_necesarias = [
+            "Folio Sugo", "Folio Wizard", "Tipo Respuesta",
+            "Selfservice", "Dictamen Wizard", "Informe",
+        ]
 
         ruta_excel = excel_path if excel_path else settings.INPUT_FILE
         excel_name = Path(ruta_excel).stem if ruta_excel else "Oficios"
         progreso_file = Path(ruta_excel).parent / f"{excel_name}_resultados.csv" if ruta_excel else settings.FILE_EXITOS
 
-        df = cargar_datos(cols_necesarias, col_status_asignacion, col_status_informe, excel_path, progreso_file, log_callback)
+        df = cargar_datos(
+            cols_necesarias,
+            "Status SUGO Asignacion",
+            "Status WIZARD Finalizacion",
+            "Status SUGO Informe",
+            excel_path,
+            progreso_file,
+            log_callback,
+        )
         if df is None:
             _log("No se pudo cargar el archivo de datos. Proceso cancelado.", error=True)
             return
-        
-        if tipo_tarea == "wizard":
-            pendientes = df[df[col_status_asignacion] != "Completado"].index.tolist()
-        elif tipo_tarea == "sugo":
-            pendientes = df[df[col_status_informe] != "Completado"].index.tolist()
-        elif tipo_tarea == "asignacion":
-            pendientes = df[df[col_status_asignacion].isin(["Pendiente", "Error"])].index.tolist()
 
+        # Asegurar que la columna de status de esta tarea exista en el DataFrame
+        if col_status not in df.columns:
+            df[col_status] = "Pendiente"
+
+        pendientes = tarea_cfg["pendiente_fn"](df, col_status)
         total = len(pendientes)
         _log(f"Folios pendientes a procesar: {total}")
 
@@ -428,39 +503,52 @@ async def orchestrator(
             _log("No hay folios pendientes. El proceso ha finalizado.", success=True)
             return
 
+        # ── Validar credenciales si la tarea las necesita ─────────────────────
+        if tarea_cfg["requiere_sugo"] and (not user or not password):
+            _log("Se requieren credenciales para ejecutar este proceso.", error=True)
+            return
+
         async with async_playwright() as p:
-            # ── Preparar contexto de navegador según tipo de tarea ──
-            if tipo_tarea == "wizard":
-                _log(f"Iniciando navegador (modo_oculto={modo_oculto})...")
-                context = await p.chromium.launch_persistent_context(
-                    user_data_dir=settings.USER_DATA_DIR,
-                    channel="chrome",
-                    headless=modo_oculto,
-                    accept_downloads=True,
-                    args=[
-                        "--disable-blink-features=AutomationControlled",
-                        "--disable-gpu",
-                        "--no-sandbox",
-                        "--window-size=1920,1080"
-                    ]
-                )
-                browser = None
-            else:
-                if not user or not password:
-                    _log("Se requieren credenciales para ejecutar el proceso SUGO.", error=True)
+
+            # ── Inicialización del navegador (switch por tipo_tarea) ───────────
+            match tipo_tarea:
+
+                case "wizard" | "asignacion":
+                    _log(f"Iniciando navegador (modo_oculto={modo_oculto})...")
+                    context = await p.chromium.launch_persistent_context(
+                        user_data_dir=settings.USER_DATA_DIR,
+                        channel="chrome",
+                        headless=modo_oculto,
+                        accept_downloads=True,
+                        args=[
+                            "--disable-blink-features=AutomationControlled",
+                            "--disable-gpu",
+                            "--no-sandbox",
+                            "--window-size=1920,1080",
+                        ],
+                    )
+                    browser = None
+
+                case "sugo":
+                    _log(f"Iniciando navegador para SUGO (modo_oculto={modo_oculto})...")
+                    browser = await p.chromium.launch(
+                        headless=modo_oculto,
+                        channel="chrome",
+                        args=["--disable-gpu", "--no-sandbox", "--window-size=1920,1080"],
+                    )
+                    storage = await sugo_login(browser, user, password, log_callback)
+                    if not storage:
+                        _log("Error de autenticación. No se puede continuar.", error=True)
+                        await browser.close()
+                        return
+                    context = await browser.new_context(
+                        storage_state=storage, ignore_https_errors=True
+                    )
+
+                case _:
+                    # Rama de seguridad (no debería alcanzarse tras la validación anterior)
+                    _log(f"Tipo de tarea sin configuración de navegador: '{tipo_tarea}'", error=True)
                     return
-                _log(f"Iniciando navegador para SUGO (modo_oculto={modo_oculto})...")
-                browser = await p.chromium.launch(
-                    headless=modo_oculto,
-                    channel="chrome",
-                    args=["--disable-gpu", "--no-sandbox", "--window-size=1920,1080"]
-                )
-                storage = await manejar_login_intranet(browser, user, password, log_callback)
-                if not storage:
-                    _log("Error de autenticación. No se puede continuar.", error=True)
-                    await browser.close()
-                    return
-                context = await browser.new_context(storage_state=storage, ignore_https_errors=True)
 
             try:
                 page = context.pages[0] if context.pages else await context.new_page()
@@ -470,39 +558,54 @@ async def orchestrator(
                     folio = str(datos.get("Folio Sugo", datos.get("Folio Wizard", idx))).strip()
                     _log(f"[{i+1}/{total}] Procesando folio: {folio}")
 
+                    # Marcar "Procesando" en el Excel y notificar a la UI
+                    df.at[idx, col_status] = "Procesando"
                     if status_callback:
                         status_callback(idx, "Procesando")
 
-                    if tipo_tarea == "wizard":
-                        resultado = await finalizacion_wizard(datos, page)
-                        df.at[idx, col_status_asignacion] = resultado
-                    elif tipo_tarea == "asignacion":
-                        resultado = await asignacion_wizard(datos, page)
-                        df.at[idx, col_status_asignacion] = resultado
-                    else:
-                        resultado_dict = await cierre_operaciones_asig_juridico(datos, page, informes_dir=informes_dir)
-                        resultado = resultado_dict.get("status", "Error")
-                        motivo = resultado_dict.get("motivo", "")
-                        if resultado == "ERROR" and motivo:
-                            _log(f"  → Error en folio {folio}: {motivo}", error=True)
+                    # ── Despacho del handler (switch por tipo_tarea) ──────────
+                    match tipo_tarea:
 
-                        df.at[idx, col_status_informe] = resultado
+                        case "wizard-finalizacion":
+                            resultado = await wizard_finalizacion(datos, page)
 
+                        case "sugo-asignacion":
+                            resultado = await sugo_asignacion(datos, page)
+
+                        case "sugo-informe":
+                            resultado_dict = await sugo_cierre_operaciones_asig_juridico(
+                                datos, page, informes_dir=informes_dir
+                            )
+                            resultado = resultado_dict.get("Status SUGO Informe", "Error")
+                            motivo = resultado_dict.get("Motivo", "")
+                            if resultado == "ERROR" and motivo:
+                                _log(f"  → Error en folio {folio}: {motivo}", error=True)
+
+                        case _:
+                            resultado = "Error"
+                            _log(f"  → Tipo de tarea sin handler: '{tipo_tarea}'", error=True)
+
+                    # ── Persistir resultado en la columna de status de esta tarea ─
+                    df.at[idx, col_status] = resultado
                     if status_callback:
                         status_callback(idx, resultado)
 
-                    if resultado in ("Completado", "OK"):
+                    # ── Log de resultado ──────────────────────────────────────
+                    if resultado in ("Completado", "OK", "Asignado"):
                         _log(f"  → Folio {folio}: {resultado}", success=True)
                     elif resultado in ("Omitido INE", "No encontrado"):
                         _log(f"  → Folio {folio}: {resultado}", warning=True)
-                    elif resultado == "Error":
+                    elif resultado in ("Error", "ERROR"):
                         _log(f"  → Folio {folio}: Error inesperado", error=True)
+                    else:
+                        _log(f"  → Folio {folio}: {resultado}")
 
-                    # Guardado incremental
+                    # ── Guardado incremental al CSV de progreso ───────────────
                     if (i + 1) % settings.BATCH_GUARDADO == 0:
                         df.to_csv(progreso_file, index=False)
                         _log(f"  Progreso guardado ({i+1}/{total} procesados)")
 
+                # Guardado final
                 df.to_csv(progreso_file, index=False)
                 _log(f"Proceso finalizado. Resultados guardados en: {progreso_file}", success=True)
 
@@ -519,3 +622,4 @@ async def orchestrator(
     finally:
         if done_callback:
             done_callback()
+
