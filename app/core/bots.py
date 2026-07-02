@@ -531,7 +531,7 @@ async def orchestrator(
         # Columnas mínimas requeridas en el Excel de entrada
         cols_necesarias = [
             "Folio Sugo", "Folio Wizard", "Tipo Respuesta",
-            "Selfservice", "Dictamen Wizard", "Informe",
+            "Selfservice", "Dictamen Wizard", "Informe", "Fecha Cierre"
         ]
 
         ruta_excel = excel_path if excel_path else settings.INPUT_FILE
