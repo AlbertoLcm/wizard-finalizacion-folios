@@ -152,7 +152,7 @@ async def cierre_operaciones_asig_juridico(datos: dict, page: Page, informes_dir
         async with page.context.expect_page(
             predicate=filtro_url, timeout=5000
         ) as new_page_visor:
-            await page.evaluate("generarInforme();")
+            await page.locator("#btnAdjOpeC1").click()
 
         page_visor = await new_page_visor.value
         await page_visor.wait_for_load_state()
@@ -241,7 +241,6 @@ async def cierre_operaciones_asig_juridico(datos: dict, page: Page, informes_dir
 
 
 async def finalizacion_wizard(datos: dict, page: Page):
-    """Lógica específica para Wizard (Opción 2)."""
     folio_sugo = str(datos.get("Folio Sugo", "")).strip()
     folio_wizard = str(datos.get("Folio Wizard")).strip()
     tipo_respuesta = str(datos.get("Tipo Respuesta")).strip().lower()

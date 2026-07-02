@@ -123,7 +123,7 @@ class BotWizardApp(ctk.CTk):
             self.informes_path = str(settings.DOCUMENTS_UPLOAD)
             self.panel_izq.set_folder_path(self.informes_path)
 
-        self.panel_logs.agregar_log("Sistema Bot Wizard iniciado correctamente.", success=True)
+        self.panel_logs.agregar_log("Sistema RPA's Especiales iniciado correctamente.", success=True)
 
     # ==========================================
     # HELPERS INTERNOS
