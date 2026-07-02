@@ -5,7 +5,7 @@ from pathlib import Path
 import pandas as pd
 from typing import Callable, Optional
 from playwright.async_api import async_playwright, Page, TimeoutError as PlaywrightTimeoutError
-
+import datetime
 
 def obtener_argumentos_navegador():
     return [
@@ -158,6 +158,13 @@ async def sugo_cierre_operaciones_asig_juridico(datos: dict, page: Page, informe
             print(msg)
     folio_sugo = str(datos.get("Folio Sugo", "")).strip()
     archivo = str(datos.get("Informe", "")).strip()
+    fecha_cierre = str(datos.get("Fecha Cierre", "")).strip()
+
+    if not folio_sugo or not archivo:
+        return "Folio Sugo o Informe faltante"
+
+    if not fecha_cierre:
+        fecha_cierre = datetime.now().strftime("%d/%m/%Y")
 
     pagina_upload = None
     page_visor = None
@@ -370,23 +377,24 @@ async def wizard_finalizacion(datos: dict, page: Page, log_callback: Optional[Ca
         return "Omitido INE"
 
     try:
-        await page.goto(settings.URL_WIZARD_MIS_TAREAS, timeout=60000)
+        await page.goto(settings.URL_WIZARD_MIS_TAREAS, timeout=80_000)
         await asyncio.sleep(3)
         await page.get_by_role("button", name="Filtros").click()
+        await page.sleep(1)
         await page.fill("textarea[aria-label='Id solicitud']", folio_wizard)
         await asyncio.sleep(2)
         await page.get_by_role("button", name="Buscar").click()
 
         # Validación de resultados
         try:
-            await page.locator(".q-tab-panel").get_by_text(folio_wizard).wait_for(timeout=10_000)
+            await page.locator(".q-tab-panel").get_by_text(folio_wizard).wait_for(timeout=30_000)
         except Exception:
             return "No encontrado"
         
         await asyncio.sleep(1)
         
         await page.locator(".q-tab-panel").get_by_text(folio_wizard).click()
-        await page.get_by_text("Detalle del caso").wait_for(timeout=15_000)
+        await page.get_by_text("Detalle del caso").wait_for(timeout=30_000)
         await page.get_by_text("Detalle del caso").click()
 
         # Asignación de acuerdo a tipo de respuesta

@@ -86,7 +86,7 @@ class PanelGrid(ctk.CTkFrame):
         )
 
         # Crear Treeview
-        self.column_ids = ("folio_sugo", "folio_wizard", "tipo_respuesta", "informe", "estatus")
+        self.column_ids = ("folio_sugo", "folio_wizard", "tipo_respuesta", "informe", "[ASIGNACION]", "[FINALIZACION]", "[INFORME]")
         self.tree = ttk.Treeview(
             self.frame_table,
             columns=self.column_ids,
@@ -108,7 +108,9 @@ class PanelGrid(ctk.CTkFrame):
             "folio_wizard": {"text": "Folio Wizard", "width": 110, "anchor": "w"},
             "tipo_respuesta": {"text": "Tipo Respuesta", "width": 250, "anchor": "w"},
             "informe": {"text": "Informe", "width": 200, "anchor": "w"},
-            "estatus": {"text": "Estatus", "width": 120, "anchor": "center"}
+            "[ASIGNACION]": {"text": "Asignación", "width": 120, "anchor": "center"},
+            "[FINALIZACION]": {"text": "Finalización", "width": 120, "anchor": "center"},
+            "[INFORME]": {"text": "Informe", "width": 120, "anchor": "center"}
         }
 
         for col_id, config in column_configs.items():
