@@ -184,12 +184,7 @@ async def sugo_cierre_operaciones_asig_juridico(datos: dict, page: Page, informe
             if not pagina_upload.is_closed():
                 await pagina_upload.close()
 
-        return {
-            "status": "OK",
-            "folio": folio_sugo,
-            "message": "Proceso completado",
-            "motivo": "",
-        }
+        return "Completado"
 
     except PlaywrightTimeoutError:
         texto_error_sistema = "No se detectó el mensaje de éxito (Timeout)"
@@ -207,21 +202,11 @@ async def sugo_cierre_operaciones_asig_juridico(datos: dict, page: Page, informe
             print(f"No se pudo interactuar con el modal de error: {e_inner}")
             await page.goto(settings.URL_CIERRE_OPERACIONES, wait_until="domcontentloaded")
 
-        return {
-            "status": "ERROR",
-            "folio": folio_sugo,
-            "message": "Error en registro insumos",
-            "motivo": texto_error_sistema.strip(),
-        }
+        return "Error"
 
     except Exception as e:
         await page.goto(settings.URL_CIERRE_OPERACIONES, wait_until="domcontentloaded")
-        return {
-            "status": "ERROR",
-            "folio": folio_sugo,
-            "message": "Error inesperado en el script",
-            "motivo": str(e),
-        }
+        return "Error"
 
     finally:
         # --- LIMPIEZA DE VENTANAS ---
@@ -244,55 +229,89 @@ async def sugo_cierre_operaciones_asig_juridico(datos: dict, page: Page, informe
         await page.bring_to_front()
 
 
-async def sugo_asignacion(datos: dict, page: Page):
-    """Lógica de Asignación en Wizard: asigna el folio al analista correspondiente."""
-    folio_sugo = str(datos.get("Folio Sugo", "")).strip()
-    folio_wizard = str(datos.get("Folio Wizard", "")).strip()
-    tipo_respuesta = str(datos.get("Tipo Respuesta", "")).strip().lower()
+async def sugo_asignacion(folio_sugo, page: Page):
+    """
+        Asignación de folio en SUGO. Gestiona el flujo de asignacion aseguramientos:
+        Buscar folio → Seleccionar folio → Confirmar asignación
+        (sin seleccionar al abogado, ya que se asigna automáticamente al usuario logueado)
+    """
+    estado = {"mensajes": [], "finalizado": False}
 
-    if not folio_wizard:
-        return "Folio Wizard faltante"
+    async def manejar_dialogos(dialog):
+        mensaje = dialog.message.upper()
+        estado["mensajes"].append(mensaje)
+
+        await dialog.accept()
+
+        # Si detectamos el mensaje de éxito, marcamos como finalizado
+        if "ASIGNADO EXITOSAMENTE" in mensaje:
+            estado["finalizado"] = True
+
+    # Activamos el escuchador permanente
+    page.on("dialog", manejar_dialogos)
 
     try:
-        await page.goto(settings.URL_WIZARD_MIS_TAREAS, timeout=60000)
-        await asyncio.sleep(3)
-        await page.get_by_role("button", name="Filtros").click()
-        await page.fill("textarea[aria-label='Id solicitud']", folio_wizard)
-        await asyncio.sleep(2)
-        await page.get_by_role("button", name="Buscar").click()
+        await page.goto(settings.URL_ASIGNACION_SUGO, wait_until="domcontentloaded", timeout=6000)
+
+        checkbox = page.locator("#radFolio")
+        await checkbox.wait_for(state="visible")
+        await checkbox.click()
+
+        await page.fill("#txtFolio", folio_sugo)
+
+        async with page.expect_navigation():
+            await page.evaluate("preBuscar()")
+
+        await page.wait_for_selector("#tablaAñadidos1", timeout=3000)
+
+        checkbox_folio = page.locator("#seleccionFolio0")
+        await checkbox_folio.wait_for(state="visible")
+        await checkbox_folio.click()
+
+        await page.evaluate("preAutoasignar()")
+
+        intentos = 0
+        while intentos < 20:  # Espera máxima de 10 segundos (20 * 0.5)
+            if estado["finalizado"]:
+                return "Completado"
+
+            # Verificamos si apareció el modal de error en lugar del alert
+            if await page.locator("#BTACEPTAR").is_visible():
+                raise PlaywrightTimeoutError("Apareció modal de error #BTACEPTAR")
+
+            await asyncio.sleep(0.5)
+            intentos += 1
+
+        raise PlaywrightTimeoutError("No se recibió confirmación de éxito a tiempo")
+
+    except PlaywrightTimeoutError:
+        texto_error_sistema = "No se detectó el mensaje de éxito (Timeout)"
 
         try:
-            await page.locator(".q-tab-panel").get_by_text(folio_wizard).wait_for(timeout=10_000)
-        except:
-            return "No encontrado"
+            await page.wait_for_selector("#BTACEPTAR", timeout=15000)
+            texto_error_sistema = await page.locator(
+                ".TextoAlerta .txtAlertArqVN"
+            ).inner_text()
 
-        await asyncio.sleep(1)
-        await page.locator(".q-tab-panel").get_by_text(folio_wizard).click()
-        await page.get_by_text("Detalle del caso").wait_for(timeout=15_000)
-        await page.get_by_text("Detalle del caso").click()
+            async with page.expect_navigation():
+                await page.click("#BTACEPTAR")
 
-        # Asignación de tipo de respuesta
-        if 'negativa' in tipo_respuesta:
-            await page.locator(".q-px-lg.q-mb-xl.col-md-3.col-sm-5.col-xs-12.q-mb-lg.field-cell", has_text="Respuesta del oficio").click()
-            await page.get_by_role("option", name="Negativa SITI").click()
-            await asyncio.sleep(1)
-        else:
-            await page.locator(".q-px-lg.q-mb-xl.col-md-3.col-sm-5.col-xs-12.q-mb-lg.field-cell", has_text="Respuesta del oficio").click()
-            await page.get_by_role("option", name="Positiva").click()
-            await asyncio.sleep(1)
+        except Exception as e_inner:
+            print(f"No se pudo interactuar con el modal de error: {e_inner}")
+            await page.goto(settings.URL_ASIGNACION_SUGO, wait_until="domcontentloaded")
 
-        # Guardar sin finalizar
-        guardar_btn = page.get_by_role("button", name="Guardar")
-        if await guardar_btn.is_visible():
-            await guardar_btn.click()
-            await asyncio.sleep(2)
-
-        return "Asignado"
-
-    except Exception as e:
-        print(f"Error en asignación folio {folio_wizard}: {e}")
         return "Error"
 
+    except Exception as e:
+        await page.goto(settings.URL_ASIGNACION_SUGO, wait_until="domcontentloaded")
+        return "Error"
+
+    finally:
+        try:
+            page.remove_listener("dialog", manejar_dialogos)
+        except:
+            pass
+  
 
 async def wizard_finalizacion(datos: dict, page: Page):
     folio_sugo = str(datos.get("Folio Sugo", "")).strip()
@@ -305,7 +324,6 @@ async def wizard_finalizacion(datos: dict, page: Page):
         return "Folio Wizard o Tipo Respuesta faltante"
     
     if 'ine' in selfservice:
-        print(f"Folio INE. Omitiendo: {folio_sugo}")
         #TODO: Implementar logica para los INE
         return "Omitido INE"
 
@@ -367,7 +385,6 @@ async def wizard_finalizacion(datos: dict, page: Page):
         return "Completado"
     
     except Exception as e:
-        print(f"Error en folio {folio_wizard}: {e}")
         return "Error"
 
 
