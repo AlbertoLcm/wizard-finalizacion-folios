@@ -246,24 +246,38 @@ class BotWizardApp(ctk.CTk):
     def cmd_asignacion(self):
         """Botón Asignación — Asignación SUGO de folios."""
         def _iniciar_asignacion():
-            self._col_status_activa = "Status SUGO Asignacion"
-            modo_oculto = self.panel_izq.get_modo_oculto()
-            modo_txt = "oculto (headless)" if modo_oculto else "visible"
-            self._log(f"Iniciando proceso de Asignación en modo {modo_txt}...")
-            self._set_estado("Ejecutando Asignación...", color=settings.COLOR_CYAN, is_processing=True)
+            self._log("Preparando proceso SUGO. Solicitando credenciales...")
+            self._set_estado("Esperando credenciales...", color=settings.COLOR_CYAN, is_processing=True)
             self._set_ui_bloqueada(True)
-            self.after(0, lambda: self.panel_grid.set_col_status_activa(self._col_status_activa))
 
-            coro = orchestrator(
-                tipo_tarea="sugo-asignacion",
-                modo_oculto=modo_oculto,
-                log_callback=self._log,
-                done_callback=self._on_proceso_terminado,
-                excel_path=self.excel_path,
-                informes_dir=self.informes_path,
-                status_callback=self._update_row_status,
-            )
-            self._ejecutar_en_hilo(coro)
+            def _on_credenciales_ok(user: str, password: str):
+
+                self._col_status_activa = "Status SUGO Asignacion"
+                modo_oculto = self.panel_izq.get_modo_oculto()
+                modo_txt = "oculto (headless)" if modo_oculto else "visible"
+                self._log(f"Iniciando proceso de Asignación en modo {modo_txt}...")
+                self._set_estado("Ejecutando Asignación...", color=settings.COLOR_CYAN, is_processing=True)
+                self._set_ui_bloqueada(True)
+                self.after(0, lambda: self.panel_grid.set_col_status_activa(self._col_status_activa))
+
+                coro = orchestrator(
+                    tipo_tarea="sugo-asignacion",
+                    modo_oculto=modo_oculto,
+                    log_callback=self._log,
+                    done_callback=self._on_proceso_terminado,
+                    user=user,
+                    password=password,
+                    excel_path=self.excel_path,
+                    informes_dir=self.informes_path,
+                    status_callback=self._update_row_status,
+                )
+                self._ejecutar_en_hilo(coro)
+
+            def _on_cancelado():
+                self._log("Proceso SUGO cancelado por el usuario.", warning=True)
+                self._on_proceso_terminado()
+
+            DialogLogin(self, callback_ok=_on_credenciales_ok, callback_cancel=_on_cancelado)
 
         self._verificar_progreso_y_ejecutar(_iniciar_asignacion)
 
