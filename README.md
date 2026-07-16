@@ -1,4 +1,4 @@
-# Bot Wizard — Panel de Control
+# Bot Wizard — Finalización Wizard
 
 > Herramienta de automatización RPA para la gestión de folios de **Atención a Autoridades** en los sistemas internos BBVA.
 

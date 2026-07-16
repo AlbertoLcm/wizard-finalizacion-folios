@@ -84,7 +84,7 @@ class DialogLogin(ctk.CTkToplevel):
         ).pack(side="left")
 
         ctk.CTkButton(
-            frame_btns, text="Iniciar Sesión  →", height=38,
+            frame_btns, text="Iniciar Sesión", height=38,
             fg_color=settings.COLOR_ELECTRIC, text_color="white",
             hover_color=settings.COLOR_MIDNIGHT, corner_radius=8,
             font=ctk.CTkFont(size=13, weight="bold"),

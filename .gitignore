@@ -1,9 +1,11 @@
 # ──────────────────────────────────────────────
 # Python
 # ──────────────────────────────────────────────
+# Caché de Python
 __pycache__/
 *.py[cod]
 *$py.class
+
 *.pyo
 *.pyd
 *.so
@@ -26,9 +28,6 @@ ENV/
 # ──────────────────────────────────────────────
 # Datos sensibles y archivos generados en runtime
 # ──────────────────────────────────────────────
-
-# Archivo de entrada con datos de folios
-Oficios.xlsx
 
 # Toda la carpeta de salida del bot (sesiones, resultados, documentos)
 dist/
