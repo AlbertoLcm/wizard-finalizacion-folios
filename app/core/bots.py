@@ -15,6 +15,51 @@ def obtener_argumentos_navegador():
         "--window-size=1920,1080"
     ]
 
+def estandarizar_fechas(fecha):
+    meses_es = {
+        "ene": "01",
+        "feb": "02",
+        "mar": "03",
+        "abr": "04",
+        "may": "05",
+        "jun": "06",
+        "jul": "07",
+        "ago": "08",
+        "sep": "09",
+        "oct": "10",
+        "nov": "11",
+        "dic": "12",
+    }
+    fecha = str(fecha).strip().lower()
+    if pd.isnull(fecha) or fecha == "nat" or fecha == "":
+        return ""
+    for mes, num in meses_es.items():
+        if mes in fecha:
+            fecha = fecha.replace(mes, num)
+            break
+    formatos = [
+        "%Y-%m-%d",
+        "%d-%m-%Y",
+        "%d/%m/%Y",
+        "%Y/%m/%d",
+        "%d-%m-%y",
+        "%d-%m-%Y",
+        "%d %m %Y",
+        "%m/%d/%Y",
+        "%d/%m/%Y %H:%M:%S",
+        "%d/%m/%y %H:%M:%S",
+        "%d-%m-%Y %H:%M:%S",
+        "%Y-%m-%d %H:%M:%S",
+        "%d-%m-%y %H:%M:%S",
+    ]
+    for formato in formatos:
+        try:
+            fecha_obj = datetime.strptime(fecha, formato)
+            return fecha_obj.strftime("%Y-%m-%d")
+        except ValueError:
+            continue
+    return ""
+
 
 async def autenticar_google(log_callback: Optional[Callable] = None):
     def _log(msg, **kw):
@@ -163,6 +208,10 @@ async def sugo_cierre_operaciones_asig_juridico(datos: dict, page: Page, informe
     if not folio_sugo or not archivo:
         return "Folio Sugo o Informe faltante"
 
+    if fecha_cierre:
+        fecha_cierre = estandarizar_fechas(fecha_cierre)
+        fecha_cierre = datetime.strptime(fecha_cierre, "%Y-%m-%d")
+        fecha_cierre = fecha_cierre.strftime("%d/%m/%Y")
     if not fecha_cierre:
         fecha_cierre = datetime.datetime.now().strftime("%d/%m/%Y")
 
@@ -187,14 +236,24 @@ async def sugo_cierre_operaciones_asig_juridico(datos: dict, page: Page, informe
         await checkbox_folio.wait_for(state="visible")
         await checkbox_folio.click()
 
-        filtro_url = lambda p: "image-viewer.jsp" in p.url
-        async with page.context.expect_page(
-            predicate=filtro_url, timeout=5000
-        ) as new_page_visor:
-            await page.locator("#btnAdjOpeC1").click()
+        if fecha_cierre:
+            await page.evaluate(
+                f"document.getElementById('fechaFin2').value = '{fecha_cierre}'"
+            )
 
-        page_visor = await new_page_visor.value
-        await page_visor.wait_for_load_state()
+        try:
+            filtro_url = lambda p: "image-viewer.jsp" in p.url
+            async with page.context.expect_page(
+                predicate=filtro_url, timeout=5000
+            ) as new_page_visor:
+                await page.locator("#btnAdjJuriC1").click()
+
+            page_visor = await new_page_visor.value
+            await page_visor.wait_for_load_state()
+
+        except Exception as e:
+            _log(f"No se abrio el visor, revisa la VPN", error=True)
+            return "Error"
 
         frame_visor = page_visor.frame_locator('frame[name="viewerFrame"]')
         link_upload = frame_visor.locator('a[href*="imageManager(2)"]')
@@ -214,7 +273,7 @@ async def sugo_cierre_operaciones_asig_juridico(datos: dict, page: Page, informe
         await pagina_upload.click("//input[@type='submit']")
 
         try:
-            await pagina_upload.wait_for_event("close", timeout=10000)
+            await pagina_upload.wait_for_event("close", timeout=10_000)
         except Exception:
             if not pagina_upload.is_closed():
                 await pagina_upload.close()
@@ -262,7 +321,6 @@ async def sugo_cierre_operaciones_asig_juridico(datos: dict, page: Page, informe
             except Exception:
                 pass
 
-        # Opcional: Volver a poner el foco en la página principal
         await page.bring_to_front()
 
 
@@ -310,16 +368,12 @@ async def sugo_asignacion(folio_sugo, page: Page, log_callback: Optional[Callabl
         await checkbox_folio.wait_for(state="visible")
         await checkbox_folio.click()
 
-        await page.evaluate("preAutoasignar()")
+        await page.evaluate("preAutoasignar();")
 
         intentos = 0
-        while intentos < 20:  # Espera máxima de 10 segundos (20 * 0.5)
+        while intentos < 30:  # Espera máxima de 15 segundos (30 * 0.5)
             if estado["finalizado"]:
                 return "Completado"
-
-            # Verificamos si apareció el modal de error en lugar del alert
-            if await page.locator("#BTACEPTAR").is_visible():
-                raise PlaywrightTimeoutError("Apareció modal de error #BTACEPTAR")
 
             await asyncio.sleep(0.5)
             intentos += 1

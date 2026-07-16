@@ -2,7 +2,7 @@ name: Compilar Python + Playwright a EXE desde Features
 
 on:
   push:
-    branches: [ "features", "features/**" ]
+    branches: [ "main" ]
   workflow_dispatch:
 
 jobs:
