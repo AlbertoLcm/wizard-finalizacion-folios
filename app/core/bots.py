@@ -642,7 +642,7 @@ async def orchestrator(
                     )
                     browser = None
 
-                case "sugo-informe" | "sugo-asignacion":
+                case "sugo-asignacion":
                     _log(f"Iniciando navegador para SUGO Informe (modo_oculto={modo_oculto})...")
                     browser = await p.chromium.launch(
                         headless=modo_oculto,
@@ -680,18 +680,17 @@ async def orchestrator(
                     match tipo_tarea:
 
                         case "wizard-finalizacion":
-                            resultado = await wizard_finalizacion(
+                            res_cierre_wizard = await wizard_finalizacion(
                                 datos, page, log_callback=log_callback
+                            )
+
+                            res_carga_informe = await sugo_cierre_operaciones_asig_juridico(
+                                datos, page, informes_dir=informes_dir, log_callback=log_callback
                             )
 
                         case "sugo-asignacion":
                             folio_sugo = str(datos.get("Folio Sugo", "")).strip()
                             resultado = await sugo_asignacion(folio_sugo, page, log_callback=log_callback)
-
-                        case "sugo-informe":
-                            resultado = await sugo_cierre_operaciones_asig_juridico(
-                                datos, page, informes_dir=informes_dir, log_callback=log_callback
-                            )
 
                         case _:
                             resultado = "Error"
