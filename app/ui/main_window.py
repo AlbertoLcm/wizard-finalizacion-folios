@@ -7,7 +7,7 @@ from PIL import Image
 import customtkinter as ctk
 
 from app.config import settings
-from app.core.bots import autenticar_google, cargar_datos, orchestrator
+from app.core.bots import preparar_entorno, cargar_datos, orchestrator
 
 from app.ui.panel_logs import PanelLogs
 from app.ui.panel_controls import PanelControls
@@ -133,13 +133,6 @@ class BotWizardApp(ctk.CTk):
     # HELPERS INTERNOS
     # ==========================================
 
-    def _get_progreso_path(self) -> Path | None:
-        """Devuelve la ruta del CSV de progreso asociado al Excel activo."""
-        if not self.excel_path:
-            return None
-        excel_path_obj = Path(self.excel_path)
-        return excel_path_obj.parent / f"{excel_path_obj.stem}_resultados.csv"
-
     def _log(self, msg, **kwargs):
         """Envía un mensaje al panel de logs de forma thread-safe."""
         self.after(0, lambda: self.panel_logs.agregar_log(msg, **kwargs))
@@ -173,23 +166,6 @@ class BotWizardApp(ctk.CTk):
     # ==========================================
     # EVENTOS DE LOS BOTONES
     # ==========================================
-
-    def cmd_login(self):
-        """Botón 1 — Iniciar Sesión Google Drive (persistente)."""
-        self._log("Iniciando proceso de autenticación Google Drive...")
-        self._set_estado("Autenticando Google...", color=settings.COLOR_CYAN, is_processing=True)
-        self._set_ui_bloqueada(True)
-
-        async def _tarea():
-            try:
-                await autenticar_google(log_callback=self._log)
-                self._log("Sesión de Google Drive guardada correctamente.", success=True)
-            except Exception as e:
-                self._log(f"Error durante la autenticación: {e}", error=True)
-            finally:
-                self._on_proceso_terminado()
-
-        self._ejecutar_en_hilo(_tarea())
 
     def _verificar_progreso_y_ejecutar(self, ejecutar_callback):
         if not self.excel_path:
@@ -331,23 +307,13 @@ class BotWizardApp(ctk.CTk):
             return
 
         try:
-            # Columna de status por defecto al cargar desde disco
-            # (se muestra la primera que exista; el orquestador la actualizará en tiempo real)
             col_status_default = "Status SUGO Asignacion"
-            cols_necesarias = [
-                "Folio Sugo", "Folio Wizard", "Tipo Respuesta",
-                "Selfservice", "Dictamen Wizard", "Informe",
-            ]
 
-            progreso_file = self._get_progreso_path()
+            preparar_entorno()
 
-            df = cargar_datos(
-                columnas_requeridas=cols_necesarias,
-                col_status=col_status_default,
-                excel_path=self.excel_path,
-                progreso_file=str(progreso_file) if progreso_file else None,
-                log_callback=self._log,
-            )
+            df = cargar_datos(log_callback=self._log,)
+            
+
             if df is not None:
                 self.panel_grid.cargar_datos(df, col_status=col_status_default)
                 self._log(f"Se cargaron {len(df)} registros en la tabla.", success=True)

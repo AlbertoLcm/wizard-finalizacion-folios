@@ -3,17 +3,18 @@ from app.config import settings
 import os
 from pathlib import Path
 import pandas as pd
-from typing import Callable, Optional
-from playwright.async_api import async_playwright, Page, TimeoutError as PlaywrightTimeoutError
-import datetime
+from typing import Tuple, Callable, Optional
+from playwright.async_api import async_playwright, BrowserContext, Page, Playwright, TimeoutError as PlaywrightTimeoutError
+from datetime import datetime
+import re
+from pathlib import Path
+import sys
+import json
+import shutil
 
-def obtener_argumentos_navegador():
-    return [
-        "--disable-blink-features=AutomationControlled",
-        "--disable-gpu",
-        "--no-sandbox",
-        "--window-size=1920,1080"
-    ]
+# ================================================
+#           Utils
+# ================================================
 
 def estandarizar_fechas(fecha):
     meses_es = {
@@ -61,275 +62,76 @@ def estandarizar_fechas(fecha):
     return ""
 
 
-async def autenticar_google(log_callback: Optional[Callable] = None):
-    def _log(msg, **kw):
-        if log_callback:
-            log_callback(msg, **kw)
-        else:
-            print(msg)
-
-    _log(f"Iniciando autenticación Google (perfil: {settings.USER_DATA_DIR})...")
-    async with async_playwright() as p:
-        context = await p.chromium.launch_persistent_context(
-            user_data_dir=settings.USER_DATA_DIR,
-            headless=False,
-            channel="chrome",
-            args=obtener_argumentos_navegador()
-        )
-        try:
-            page = context.pages[0] if context.pages else await context.new_page()
-            await page.goto("https://drive.google.com")
-            _log("Navegador abierto. Inicia sesión y cierra la ventana del navegador cuando termines.", success=True)
-            await page.wait_for_event("close", timeout=120_000)
-        finally:
-            await context.close()
-
-
 def preparar_entorno():
-    """Crea la carpeta dist/ y sus subcarpetas necesarias si no existen."""
+    """Borra la carpeta dist/ y sus subcarpetas si existen, y las vuelve a crear."""
     carpetas = [
         settings.DIST_DIR,
-        settings.DOCUMENTS_UPLOAD,
         settings.USER_DATA_DIR,
     ]
+    
     for carpeta in carpetas:
-        Path(carpeta).mkdir(parents=True, exist_ok=True)
+        path_obj = Path(carpeta)
+        
+        if path_obj.exists():
+            shutil.rmtree(path_obj)
+            
+        path_obj.mkdir(parents=True, exist_ok=True)
 
-
-def cargar_datos(
-    columnas_requeridas,
-    col_status: str,
-    excel_path: Optional[str] = None,
-    progreso_file: Optional[str] = None,
-    log_callback: Optional[Callable] = None,
-):
-    """
-    Carga el progreso o el archivo inicial de forma genérica.
-
-    Args:
-        columnas_requeridas: columnas mínimas que debe tener el Excel de entrada.
-        col_status:          columna de status de la tarea actual; se inicializa
-                             con "Pendiente" solo si no existe ya en el CSV/Excel.
-        excel_path:          ruta del Excel de entrada (usa settings.INPUT_FILE si None).
-        progreso_file:       ruta del CSV de progreso (se calcula automáticamente si None).
-        log_callback:        función de log opcional.
-    """
+def cargar_credenciales_sugo(log_callback) -> Tuple[str, str]:
     def _log(msg, **kw):
         if log_callback:
             log_callback(msg, **kw)
         else:
             print(msg)
 
-    ruta_excel = excel_path if excel_path else settings.INPUT_FILE
+    """Carga usuario y contraseña del archivo JSON."""
+    try:
+        with open(settings.ARCHIVO_CREDENCIALES, "r", encoding="utf-8") as f:
+            creds = json.load(f)
+        return creds["user"], creds["password"]
+    except FileNotFoundError:
+        _log(f"No se encontró el archivo '{settings.ARCHIVO_CREDENCIALES}'.", error=True)
+        sys.exit(1)
+    except KeyError as exc:
+        _log(f"Formato de credenciales inválido. Falta la clave {exc}.", error=True)
+        sys.exit(1)
+    except Exception as exc:
+        _log(f"Error inesperado al cargar credenciales: {exc}", error=True)
+        sys.exit(1)
 
-    if not progreso_file:
-        if ruta_excel:
-            excel_name = Path(ruta_excel).stem
-            progreso_file = Path(ruta_excel).parent / f"{excel_name}_resultados.csv"
+
+def cargar_datos(log_callback):
+    def _log(msg, **kw):
+        if log_callback:
+            log_callback(msg, **kw)
         else:
-            progreso_file = settings.FILE_EXITOS
+            print(msg)
 
-    if os.path.exists(progreso_file):
-        _log(f"Progreso previo encontrado. Continuando desde {progreso_file}...", success=True)
-        df = pd.read_csv(progreso_file)
-        if set(columnas_requeridas).issubset(df.columns):
-            # Asegurar que la columna de la tarea actual exista sin sobrescribir
-            if col_status not in df.columns:
-                df[col_status] = "Pendiente"
-            return df
-        _log("El archivo de progreso no tiene las columnas necesarias. Cargando original...", warning=True)
+    if Path(settings.TEMP_FILE).exists():
+        df = pd.read_csv(settings.TEMP_FILE)
+        
+    else:
+        df = pd.read_excel(settings.INPUT_FILE)
 
-    if not ruta_excel or not os.path.exists(ruta_excel):
-        _log(f"No se encontró el archivo de entrada: {ruta_excel}", error=True)
-        return None
+        if not set(settings.COLUMNS_REQUIRED).issubset(df.columns):
+            _log(f"El Excel debe contener las columnas: {', '.join(settings.COLUMNS_REQUIRED)}", error=True)
+            return None
 
-    df = pd.read_excel(ruta_excel)
-    if not set(columnas_requeridas).issubset(df.columns):
-        _log(f"El Excel debe contener las columnas: {', '.join(columnas_requeridas)}", error=True)
-        return None
+        # Estandarización IMPORTANTE de FECHA CIERRE
+        df["Fecha Cierre"] = (
+            pd.to_datetime(df["Fecha Cierre"].apply(estandarizar_fechas))
+            .fillna(pd.Timestamp.today().normalize())
+            .dt.strftime("%d/%m/%Y")
+        )
 
-    # Inicializar solo la columna de la tarea actual
-    df[col_status] = "Pendiente"
-
-    return df
+        nuevas_columnas = ["Estatus Asignacion", "Estatus Wizard", "Estatus Informe"]
+        df[nuevas_columnas] = "pendiente"
 
 # =========================================
 # Funciones de ejecución de procesos
 # =========================================
 
-
-async def sugo_login(browser, user, password, log_callback: Optional[Callable] = None):
-    """Encapsula la lógica de autenticación en SUGO/Intranet."""
-    def _log(msg, **kw):
-        if log_callback:
-            log_callback(msg, **kw)
-        else:
-            print(msg)
-
-    context = await browser.new_context(ignore_https_errors=True)
-    page = await context.new_page()
-    try:
-        await page.goto(settings.URL_LOGIN, wait_until="domcontentloaded")
-        await asyncio.sleep(2)
-        await page.fill(".name", user)
-        await page.fill(".pass", password)
-        await asyncio.sleep(1)
-
-        async with context.expect_page() as page_info:
-            if await page.locator("//p[@onclick='validaCampos()']").is_visible():
-                await page.evaluate("""() => validaCampos()""")
-            else:
-                await page.keyboard.press("Enter")
-
-        _log(f"Usuario {user} autenticado exitosamente.", success=True)
-
-        popup = await page_info.value
-        await popup.wait_for_load_state()
-        await asyncio.sleep(3)
-
-        storage = await context.storage_state()
-        await context.close()
-        return storage
-    except Exception as e:
-        _log(f"Error durante el login: {e}", error=True)
-        return None
-    
-
-async def sugo_cierre_operaciones_asig_juridico(datos: dict, page: Page, informes_dir: Optional[str] = None, log_callback: Optional[Callable] = None):
-    def _log(msg, **kw):
-        if log_callback:
-            log_callback(msg, **kw)
-        else:
-            print(msg)
-    folio_sugo = str(datos.get("Folio Sugo", "")).strip()
-    archivo = str(datos.get("Informe", "")).strip()
-    fecha_cierre = str(datos.get("Fecha Cierre", "")).strip()
-
-    if not folio_sugo or not archivo:
-        return "Folio Sugo o Informe faltante"
-
-    if fecha_cierre:
-        fecha_cierre = estandarizar_fechas(fecha_cierre)
-        fecha_cierre = datetime.strptime(fecha_cierre, "%Y-%m-%d")
-        fecha_cierre = fecha_cierre.strftime("%d/%m/%Y")
-    if not fecha_cierre:
-        fecha_cierre = datetime.datetime.now().strftime("%d/%m/%Y")
-
-    pagina_upload = None
-    page_visor = None
-
-    try:
-        await page.goto(settings.URL_CIERRE_OPERACIONES, wait_until="domcontentloaded", timeout=6000)
-
-        checkbox = page.locator("#porFolio")
-        await checkbox.wait_for(state="visible")
-        await checkbox.click()
-
-        await page.fill("#noFolio", folio_sugo)
-
-        async with page.expect_navigation():
-            await page.evaluate("buscar();")
-
-        await page.wait_for_selector("#tablaResultados", timeout=3000)
-
-        checkbox_folio = page.locator("input[name='Tipo'][type='radio']")
-        await checkbox_folio.wait_for(state="visible")
-        await checkbox_folio.click()
-
-        if fecha_cierre:
-            await page.evaluate(
-                f"document.getElementById('fechaFin2').value = '{fecha_cierre}'"
-            )
-
-        try:
-            filtro_url = lambda p: "image-viewer.jsp" in p.url
-            async with page.context.expect_page(
-                predicate=filtro_url, timeout=5000
-            ) as new_page_visor:
-                await page.locator("#btnAdjJuriC1").click()
-
-            page_visor = await new_page_visor.value
-            await page_visor.wait_for_load_state()
-
-        except Exception as e:
-            _log(f"No se abrio el visor, revisa la VPN", error=True)
-            return "Error"
-
-        frame_visor = page_visor.frame_locator('frame[name="viewerFrame"]')
-        link_upload = frame_visor.locator('a[href*="imageManager(2)"]')
-
-        async with page_visor.context.expect_page() as upload_popup_info:
-            await link_upload.click()
-
-        pagina_upload = await upload_popup_info.value
-        await pagina_upload.wait_for_load_state("domcontentloaded")
-
-        base_dir = Path(informes_dir) if informes_dir else Path(settings.DOCUMENTS_UPLOAD)
-        ruta_archivo_acuse = base_dir / archivo
-        input_file0 = pagina_upload.locator("#file0")
-        await input_file0.set_input_files(ruta_archivo_acuse)
-
-        # Submit
-        await pagina_upload.click("//input[@type='submit']")
-
-        try:
-            await pagina_upload.wait_for_event("close", timeout=10_000)
-        except Exception:
-            if not pagina_upload.is_closed():
-                await pagina_upload.close()
-
-        return "Completado"
-
-    except PlaywrightTimeoutError:
-        texto_error_sistema = "No se detectó el mensaje de éxito (Timeout)"
-
-        try:
-            await page.wait_for_selector("#BTACEPTAR", timeout=15000)
-            texto_error_sistema = await page.locator(
-                ".TextoAlerta .txtAlertArqVN"
-            ).inner_text()
-
-            async with page.expect_navigation():
-                await page.click("#BTACEPTAR")
-
-        except Exception as e_inner:
-            _log(f"No se pudo interactuar con el modal de error: {e_inner}", warning=True)
-            await page.goto(settings.URL_CIERRE_OPERACIONES, wait_until="domcontentloaded")
-
-        _log(f"Error SUGO Informe: {texto_error_sistema}", error=True)
-        return "Error"
-
-    except Exception as e:
-        _log(f"Error inesperado en SUGO Informe: {e}", error=True)
-        await page.goto(settings.URL_CIERRE_OPERACIONES, wait_until="domcontentloaded")
-        return "Error"
-
-    finally:
-        # --- LIMPIEZA DE VENTANAS ---
-        # Cerramos de la más nueva a la más vieja
-        if pagina_upload:
-            try:
-                if not pagina_upload.is_closed():
-                    await pagina_upload.close()
-            except Exception:
-                pass
-
-        if page_visor:
-            try:
-                if not page_visor.is_closed():
-                    await page_visor.close()
-            except Exception:
-                pass
-
-        await page.bring_to_front()
-
-
-async def sugo_asignacion(folio_sugo, page: Page, log_callback: Optional[Callable] = None):
-    def _log(msg, **kw):
-        if log_callback:
-            log_callback(msg, **kw)
-        else:
-            print(msg)
+async def sugo_asignacion(folio_sugo, page: Page):
     """
         Asignación de folio en SUGO. Gestiona el flujo de asignacion aseguramientos:
         Buscar folio → Seleccionar folio → Confirmar asignación
@@ -373,7 +175,10 @@ async def sugo_asignacion(folio_sugo, page: Page, log_callback: Optional[Callabl
         intentos = 0
         while intentos < 30:  # Espera máxima de 15 segundos (30 * 0.5)
             if estado["finalizado"]:
-                return "Completado"
+                return {
+                    "status": "ok",
+                    "message": "Asignación realizada correctamente"
+                }
 
             await asyncio.sleep(0.5)
             intentos += 1
@@ -393,182 +198,349 @@ async def sugo_asignacion(folio_sugo, page: Page, log_callback: Optional[Callabl
                 await page.click("#BTACEPTAR")
 
         except Exception as e_inner:
-            _log(f"No se pudo interactuar con el modal de error: {e_inner}", warning=True)
             await page.goto(settings.URL_ASIGNACION_SUGO, wait_until="domcontentloaded")
 
-        _log(f"Error Asignación SUGO: {texto_error_sistema}", error=True)
-        return "Error"
+        return {
+            "status": "error",
+            "message": texto_error_sistema
+        }
 
-    except Exception as e:
-        _log(f"Error inesperado en Asignación SUGO: {e}", error=True)
+    except Exception:
         await page.goto(settings.URL_ASIGNACION_SUGO, wait_until="domcontentloaded")
-        return "Error"
+        return {
+            "status": "error",
+            "message": "Ocurrio un error inesperado"
+        }
 
     finally:
         try:
             page.remove_listener("dialog", manejar_dialogos)
         except Exception:
             pass
-  
 
-async def wizard_finalizacion(datos: dict, page: Page, log_callback: Optional[Callable] = None):
-    def _log(msg, **kw):
-        if log_callback:
-            log_callback(msg, **kw)
-        else:
-            print(msg)
 
+async def wizard_finalizacion(datos: dict, page: Page):
+    
     folio_wizard = str(datos.get("Folio Wizard")).strip()
     tipo_respuesta = str(datos.get("Tipo Respuesta")).strip().lower()
     selfservice = str(datos.get("Selfservice", "")).strip().lower()
     dictamen_wizard = str(datos.get("Dictamen Wizard")).strip().lower()
 
     if not folio_wizard or not tipo_respuesta or not dictamen_wizard:
-        return "Folio Wizard o Tipo Respuesta faltante"
+        return {
+            "status": "error",
+            "message": "Faltan parámetros requeridos: folio_wizard, tipo_respuesta o dictamen_wizard."
+        }
 
     if 'ine' in selfservice:
         #TODO: Implementar logica para los INE
-        return "Omitido INE"
+        return {
+            "status": "ok",
+            "message": "Folio INE fue omitido."
+        }
 
     try:
-        await page.goto(settings.URL_WIZARD_MIS_TAREAS, timeout=80_000)
-        await asyncio.sleep(3)
-        await page.get_by_role("button", name="Filtros").click()
-        await asyncio.sleep(1)
-        await page.fill("textarea[aria-label='Id solicitud']", folio_wizard)
-        await asyncio.sleep(2)
-        await page.get_by_role("button", name="Buscar").click()
+        for intento in range(2):
+            await page.goto(settings.URL_WIZARD_MIS_TAREAS, timeout=80_000)
+            await asyncio.sleep(3)
+            await page.get_by_role("button", name="Filtros").click()
+            await asyncio.sleep(3)
+            await page.fill("textarea[aria-label='Id solicitud']", folio_wizard)
+            await asyncio.sleep(3)
+            await page.get_by_role("button", name="Buscar").click()
+            await asyncio.sleep(3)
 
-        # Validación de resultados
-        try:
-            await page.locator(".q-tab-panel").get_by_text(folio_wizard).wait_for(timeout=30_000)
-        except Exception:
-            return "No encontrado"
-        
-        await asyncio.sleep(1)
+            try:
+                await page.locator(".q-tab-panel").get_by_text(folio_wizard).wait_for(timeout=5_000)
+                break
+            except Exception:
+                if intento == 1:
+                  return {
+                      "status": "error",
+                      "message": "No se encontro el Folio."
+                  }
+            
+        await asyncio.sleep(2)
         
         await page.locator(".q-tab-panel").get_by_text(folio_wizard).click()
-        await page.get_by_text("Detalle del caso").wait_for(timeout=30_000)
+        await page.get_by_text("Detalle del caso").wait_for(timeout=80_000)
         await page.get_by_text("Detalle del caso").click()
+        await asyncio.sleep(2)
 
-        # Asignación de acuerdo a tipo de respuesta
         if 'negativa' in tipo_respuesta:
-            # Respuesta del oficio
             await page.locator(".q-px-lg.q-mb-xl.col-md-3.col-sm-5.col-xs-12.q-mb-lg.field-cell", has_text="Respuesta del oficio").click()
             await page.get_by_role("option", name="Negativa SITI").click()
             await asyncio.sleep(1)
 
             if 'cargar la respuesta negativa' in dictamen_wizard:
-                # ¿Haz validado la carta?
                 chekbox_validacion = page.locator("div[aria-label='¿Has validado la  carta de respuesta?']")
                 await chekbox_validacion.wait_for(state="visible")
                 await chekbox_validacion.click()
                 await asyncio.sleep(1)
 
             if 'positivas insumos' in dictamen_wizard:
-                # Acción de cierre
                 await page.locator(".q-px-lg.q-mb-xl.col-md-3.col-sm-5.col-xs-12.q-mb-lg.field-cell", has_text="Acciones de cierre - Insumos").click()
                 await page.get_by_role("option", name="Cierre Operaciones").click()
                 await asyncio.sleep(1)
         
         else:
-            # Acción de cierre
             await page.locator(".q-px-lg.q-mb-xl.col-md-3.col-sm-5.col-xs-12.q-mb-lg.field-cell", has_text="Acciones de cierre - Insumos").click()
             await page.get_by_role("option", name="Adjuntar Informe y Cierre Jurídico").click()
             await asyncio.sleep(1)
 
-        # Envío de respuesta
         await page.locator(".q-px-lg.q-mb-xl.col-md-3.col-sm-5.col-xs-12.q-mb-lg.field-cell", has_text="Envio de respuesta").click()
         await page.get_by_role("option", name="Automático").click()
         await asyncio.sleep(1)
 
-        # Botón finalizar
         await page.get_by_role("button", name="Finalizar tarea").click()
         await asyncio.sleep(2)
         
-        return "Completado"
+        return {
+            "status": "ok",
+            "message": "Finalización correcta."
+        }
     
+    except Exception:
+        return {
+            "status": "error",
+            "message": "Ocurrio un error inesperado en el portal de WIZARD."
+        }
+
+
+async def sugo_cierre_operaciones_asig_juridico(datos: dict, page: Page, informes_dir: str):
+
+    folio_sugo = str(datos.get("Folio Sugo", "")).strip()
+    fecha_cierre = str(datos.get("Fecha Cierre", "")).strip()
+    informes_dir = Path(informes_dir)
+
+    if not folio_sugo:
+        return {
+            "status": "error",
+            "message": "Falta el Folio Sugo."
+        }
+    
+    file_informe = next(informes_dir.glob(f"*{folio_sugo}*"), None)
+
+    if not file_informe:
+        return {
+            "status": "error",
+            "message": "No se encontro el informe en la carpeta seleccionada."
+        }
+
+    pagina_upload = None
+    page_visor = None
+
+    try:
+        await page.goto(settings.URL_CIERRE_OPERACIONES, wait_until="domcontentloaded", timeout=6000)
+
+        checkbox = page.locator("#porFolio")
+        await checkbox.wait_for(state="visible")
+        await checkbox.click()
+
+        await page.fill("#noFolio", folio_sugo)
+
+        async with page.expect_navigation():
+            await page.evaluate("buscar();")
+
+        await page.wait_for_selector("#tablaResultados", timeout=3000)
+
+        checkbox_folio = page.locator("input[name='Tipo'][type='radio']")
+        await checkbox_folio.wait_for(state="visible")
+        await checkbox_folio.click()
+
+        if fecha_cierre:
+            await page.evaluate(
+                f"document.getElementById('fechaFin2').value = '{fecha_cierre}'"
+            )
+
+        try:
+            filtro_url = lambda p: "image-viewer.jsp" in p.url
+            async with page.context.expect_page(
+                predicate=filtro_url, timeout=5000
+            ) as new_page_visor:
+                await page.locator("#btnAdjJuriC1").click()
+
+            page_visor = await new_page_visor.value
+            await page_visor.wait_for_load_state()
+
+        except Exception as e:
+            return {
+                "status": "error",
+                "message": "No se abrio el VISOR, revisa la VPN."
+            }
+
+        frame_visor = page_visor.frame_locator('frame[name="viewerFrame"]')
+        link_upload = frame_visor.locator('a[href*="imageManager(2)"]')
+
+        async with page_visor.context.expect_page() as upload_popup_info:
+            await link_upload.click()
+
+        pagina_upload = await upload_popup_info.value
+        await pagina_upload.wait_for_load_state("domcontentloaded")
+
+        input_file0 = pagina_upload.locator("#file0")
+        await input_file0.set_input_files(file_informe)
+
+        # Submit
+        await pagina_upload.click("//input[@type='submit']")
+
+        try:
+            await pagina_upload.wait_for_event("close", timeout=10_000)
+        except Exception:
+            if not pagina_upload.is_closed():
+                await pagina_upload.close()
+
+        return {
+            "status": "ok",
+            "message": "Se cargo exitosamente el informe en SUGO."
+        }
+
+    except PlaywrightTimeoutError:
+        texto_error_sistema = "No se detectó el mensaje de éxito (Timeout)"
+
+        try:
+            await page.wait_for_selector("#BTACEPTAR", timeout=15000)
+            texto_error_sistema = await page.locator(
+                ".TextoAlerta .txtAlertArqVN"
+            ).inner_text()
+
+            async with page.expect_navigation():
+                await page.click("#BTACEPTAR")
+
+        except Exception as e_inner:
+            await page.goto(settings.URL_CIERRE_OPERACIONES, wait_until="domcontentloaded")
+
+        return {
+            "status": "error",
+            "message": texto_error_sistema
+        }
+
     except Exception as e:
-        _log(f"Error en wizard_finalizacion (folio={folio_wizard}): {e}", error=True)
-        return "Error"
+        await page.goto(settings.URL_CIERRE_OPERACIONES, wait_until="domcontentloaded")
+        return {
+            "status": "error",
+            "message": "Ocurrio un error inesperado en el portal de SUGO."
+        }
+
+    finally:
+        # --- LIMPIEZA DE VENTANAS ---
+        # Cerramos de la más nueva a la más vieja
+        if pagina_upload:
+            try:
+                if not pagina_upload.is_closed():
+                    await pagina_upload.close()
+            except Exception:
+                pass
+
+        if page_visor:
+            try:
+                if not page_visor.is_closed():
+                    await page_visor.close()
+            except Exception:
+                pass
+
+        await page.bring_to_front()
+
+
+# ================================================
+#           Browser
+# ================================================
+
+async def load_page_wizard(context: BrowserContext, p: Playwright, headless: bool):
+    page_wizard = await context.new_page()
+
+    await page_wizard.goto(settings.URL_WIZARD, timeout=10_000)
+    await page_wizard.wait_for_load_state(state="domcontentloaded")
+
+    if 'idp/profile' in page_wizard.url or 'accounts.google' in page_wizard.url:
+        await context.close()
+
+        context = await p.chromium.launch_persistent_context(
+            user_data_dir="dist/perfil_prueba",
+            headless=False,
+            channel="chrome",
+            args=settings.ARGUMENTOS_CHROME
+        )
+        page_login = context.pages[0] if context.pages else await context.new_page()
+
+        await page_login.goto(settings.URL_LOGIN_GOOGLE, timeout=10_000)
+        await page_login.wait_for_load_state(state="domcontentloaded")
+
+        await page_login.wait_for_url(re.compile(r"myaccount"), timeout=0)
+        
+        await context.close()
+
+        context = await p.chromium.launch_persistent_context(
+            user_data_dir="dist/perfil_prueba",
+            headless=headless,
+            channel="chrome",
+            args=settings.ARGUMENTOS_CHROME
+        )
+        page_wizard = context.pages[0] if context.pages else await context.new_page()
+        
+        await page_wizard.goto(settings.URL_WIZARD, timeout=10_000)
+        await page_wizard.wait_for_load_state(state="domcontentloaded")
+
+    if not 'welcome-page' in page_wizard.url:
+        return context, None
+
+    return context, page_wizard
+
+
+async def load_page_sugo(context: BrowserContext, user: str, password: str) -> Optional[Page]:
+    page_sugo = await context.new_page()
+
+    try:
+        async with context.expect_page(timeout=3_000) as page_info:
+            await page_sugo.goto(settings.URL_SUGO_LOGIN, timeout=10_000)
+
+        popup = await page_info.value
+        await popup.wait_for_load_state()
+        await popup.close()
+
+        await page_sugo.bring_to_front()
+        await page_sugo.goto(settings.URL_SUGO, timeout=5_000)
+        await page_sugo.wait_for_load_state("domcontentloaded")
+
+    except Exception:
+
+        await asyncio.sleep(2)
+        await page_sugo.fill(".name", user)
+        await page_sugo.fill(".pass", password)
+        await asyncio.sleep(1)
+
+        try:
+            async with context.expect_page(timeout=20_000) as page_info:
+                if await page_sugo.locator("//p[@onclick='validaCampos()']").is_visible():
+                    await page_sugo.evaluate("validaCampos()")
+
+            popup = await page_info.value
+            await popup.wait_for_load_state()
+            await popup.close()
+
+            await page_sugo.bring_to_front()
+            await page_sugo.goto(settings.URL_SUGO, timeout=5_000)
+            await page_sugo.wait_for_load_state("domcontentloaded")
+
+        except Exception as e:
+            return None
+
+    return page_sugo
 
 
 # =========================================
 # Orchestrator
 # =========================================
 
-# ── Registro declarativo de tareas ────────────────────────────────────────────
-# Para agregar una nueva tarea a futuro, añade una entrada aquí con:
-#   col_status   → columna del Excel/CSV donde se escribe el resultado por folio
-#   pendiente_fn → función(df, col) → lista de índices aún sin procesar
-#   requiere_sugo → True si el proceso necesita credenciales de Intranet
-#
-# El handler real se resuelve en el match/case dentro de orchestrator para que
-# cada caso pueda recibir parámetros propios (p.ej. informes_dir).
-# ─────────────────────────────────────────────────────────────────────────────
-TASK_REGISTRY: dict = {
-    "sugo-asignacion": {
-        "col_status": "Status SUGO Asignacion",
-        "pendiente_fn": lambda df, col: df[
-            df[col].isin(["Pendiente", "Error"])
-        ].index.tolist(),
-        "requiere_sugo": False,
-    },
-    "wizard-finalizacion": {
-        "col_status": "Status WIZARD Finalizacion",
-        "pendiente_fn": lambda df, col: df[
-            ~df[col].isin(["Completado", "Omitido INE"])
-        ].index.tolist(),
-        "requiere_sugo": False,
-    },
-    "sugo-informe": {
-        "col_status": "Status SUGO Informe",
-        "pendiente_fn": lambda df, col: df[
-            ~df[col].isin(["OK", "Completado"])
-        ].index.tolist(),
-        "requiere_sugo": True,
-    },
-    # ── Punto de extensión: agrega nuevas tareas aquí ─────────────────────────
-    # "nueva_tarea": {
-    #     "col_status": "Status Nueva Tarea",
-    #     "pendiente_fn": lambda df, col: df[df[col] == "Pendiente"].index.tolist(),
-    #     "requiere_sugo": False,
-    # },
-}
-
-
 async def orchestrator(
+    df: pd.DataFrame,
     tipo_tarea: str,
     modo_oculto: bool,
+    informes_dir: str,
     log_callback: Optional[Callable] = None,
     done_callback: Optional[Callable] = None,
-    user: Optional[str] = None,
-    password: Optional[str] = None,
-    excel_path: Optional[str] = None,
-    informes_dir: Optional[str] = None,
     status_callback: Optional[Callable[[int, str], None]] = None,
 ):
-    """
-    Orquestador único para todas las tareas RPA.
-
-    El tipo de tarea se resuelve mediante TASK_REGISTRY (datos) +
-    match/case (lógica de navegador y handler). Para añadir una nueva
-    tarea basta con:
-      1. Registrarla en TASK_REGISTRY.
-      2. Añadir un case en el bloque de inicialización del navegador.
-      3. Añadir un case en el bloque de despacho del handler.
-
-    Args:
-        tipo_tarea:      clave en TASK_REGISTRY ('wizard' | 'sugo' | 'asignacion' | ...)
-        modo_oculto:     True = headless (sin ventana de navegador)
-        log_callback:    función(msg, *, success, error, warning) para enviar logs a la UI
-        done_callback:   función() llamada al finalizar (exitoso o con error)
-        user:            usuario de Intranet (solo si requiere_sugo=True)
-        password:        contraseña de Intranet (solo si requiere_sugo=True)
-        excel_path:      ruta del archivo Excel de entrada
-        informes_dir:    ruta del directorio de informes a cargar (tarea 'sugo')
-        status_callback: función(row_index, status) para actualizar el estado visual por fila
-    """
     def _log(msg, **kw):
         if log_callback:
             log_callback(msg, **kw)
@@ -576,7 +548,9 @@ async def orchestrator(
             print(msg)
 
     try:
-        preparar_entorno()
+        user, password = cargar_credenciales_sugo(log_callback)
+
+        TASK_REGISTRY = ["asignacion", "cierre_oficio"]
 
         # ── Validar que el tipo de tarea sea conocido ─────────────────────────
         if tipo_tarea not in TASK_REGISTRY:
@@ -586,147 +560,123 @@ async def orchestrator(
                 error=True,
             )
             return
-
-        tarea_cfg = TASK_REGISTRY[tipo_tarea]
-        col_status = tarea_cfg["col_status"]
-
-        # Columnas mínimas requeridas en el Excel de entrada
-        cols_necesarias = [
-            "Folio Sugo", "Folio Wizard", "Tipo Respuesta",
-            "Selfservice", "Dictamen Wizard", "Informe", "Fecha Cierre"
-        ]
-
-        ruta_excel = excel_path if excel_path else settings.INPUT_FILE
-        excel_name = Path(ruta_excel).stem if ruta_excel else "Oficios"
-        progreso_file = Path(ruta_excel).parent / f"{excel_name}_resultados.csv" if ruta_excel else settings.FILE_EXITOS
-
-        # Bug fix: cargar_datos ahora recibe un solo col_status en lugar de dos
-        df = cargar_datos(
-            cols_necesarias,
-            col_status,
-            excel_path,
-            progreso_file,
-            log_callback,
-        )
-        if df is None:
-            _log("No se pudo cargar el archivo de datos. Proceso cancelado.", error=True)
-            return
-
-        pendientes = tarea_cfg["pendiente_fn"](df, col_status)
-        total = len(pendientes)
-        _log(f"Folios pendientes a procesar: {total}")
-
-        if total == 0:
-            _log("No hay folios pendientes. El proceso ha finalizado.", success=True)
-            return
-
-        # ── Validar credenciales si la tarea las necesita ─────────────────────
-        if tarea_cfg["requiere_sugo"] and (not user or not password):
-            _log("Se requieren credenciales para ejecutar este proceso.", error=True)
-            return
-
+        
         async with async_playwright() as p:
 
-            # ── Inicialización del navegador (switch por tipo_tarea) ───────────
-            # Bug fix: las claves deben coincidir exactamente con TASK_REGISTRY
+            context = await p.chromium.launch_persistent_context(
+                user_data_dir=settings.USER_DATA_DIR,
+                headless=modo_oculto,
+                channel="chrome",
+                args=settings.ARGUMENTOS_CHROME
+            )
+
+            for page in context.pages:
+                await page.close()
+
+
             match tipo_tarea:
 
-                case "wizard-finalizacion":
-                    _log(f"Iniciando navegador con perfil persistente (modo_oculto={modo_oculto})...")
-                    context = await p.chromium.launch_persistent_context(
-                        user_data_dir=settings.USER_DATA_DIR,
-                        channel="chrome",
-                        headless=modo_oculto,
-                        accept_downloads=True,
-                        args=obtener_argumentos_navegador(),
-                    )
-                    browser = None
+                case "cierre_oficio":
+                    _log(f"Iniciando proceso Cierre Oficio (modo_oculto={modo_oculto})...")
+                    pending_folios = df[(df['Estatus Wizard'] != "ok") | (df['Estatus Informe'] != "ok")]
+                    total_pending = len(pending_folios)
 
-                case "sugo-asignacion":
-                    _log(f"Iniciando navegador para SUGO Informe (modo_oculto={modo_oculto})...")
-                    browser = await p.chromium.launch(
-                        headless=modo_oculto,
-                        channel="chrome",
-                        args=["--disable-gpu", "--no-sandbox", "--window-size=1920,1080"],
-                    )
-                    storage = await sugo_login(browser, user, password, log_callback)
-                    if not storage:
-                        _log("Error de autenticación. No se puede continuar.", error=True)
-                        await browser.close()
+                    # Abrimos la pestaña WIZARD y la pestaña SUGO
+                    context, page_wizard = await load_page_wizard(context, p, modo_oculto)
+                    page_sugo = await load_page_sugo(context, user, password)
+
+                    if not page_wizard or not page_sugo:
+                        _log("No se pudo abrir WIZARD o SUGO, Revisar credenciales...", error=True)
                         return
-                    context = await browser.new_context(
-                        storage_state=storage, ignore_https_errors=True
-                    )
+
+                case "asignacion":
+                    _log(f"Iniciando proceso Asignación (modo_oculto={modo_oculto})...")
+                    pending_folios = df[df['Estatus Asignacion'] != "ok"]
+                    total_pending = len(pending_folios)
+
+                    # Abrimos solo la pestaña
+                    page_sugo = await load_page_sugo(context, user, password)
+
+                    if not page_sugo:
+                        _log("No se pudo abrir SUGO, Revisar credenciales...", error=True)
 
                 case _:
-                    # Rama de seguridad (no debería alcanzarse tras la validación anterior)
-                    _log(f"Tipo de tarea sin configuración de navegador: '{tipo_tarea}'", error=True)
+                    _log(f"No se encontro el tipo de actividad a realizar: '{tipo_tarea}'", error=True)
                     return
 
             try:
-                page = context.pages[0] if context.pages else await context.new_page()
+                for i, (idx, row) in enumerate(pending_folios.iterrows(), start=1):
+                    data_folio = row.to_dict()
 
-                for i, idx in enumerate(pendientes):
-                    datos = df.loc[idx].to_dict()
-                    folio = str(datos.get("Folio Sugo", datos.get("Folio Wizard", idx))).strip()
-                    _log(f"[{i+1}/{total}] Procesando folio: {folio}")
+                    folio_sugo = data_folio.get("Folio Sugo", "")
 
-                    # Marcar "Procesando" en el Excel y notificar a la UI
-                    df.at[idx, col_status] = "Procesando"
-                    if status_callback:
-                        status_callback(idx, "Procesando")
+                    _log(f"\n[{i}/{total_pending}] => {folio_sugo}:")
 
                     # ── Despacho del handler (switch por tipo_tarea) ──────────
                     match tipo_tarea:
 
                         case "wizard-finalizacion":
-                            res_cierre_wizard = await wizard_finalizacion(
-                                datos, page, log_callback=log_callback
-                            )
+                            status_wizard = data_folio.get("Estatus Wizard")
+                            status_sugo = data_folio.get("Estatus Informe")
 
-                            res_carga_informe = await sugo_cierre_operaciones_asig_juridico(
-                                datos, page, informes_dir=informes_dir, log_callback=log_callback
-                            )
+                            # Proceso WIZARD
+                            df.at[idx, "Estatus Wizard"] = "Procesando"
+                            if status_callback:
+                                status_callback(idx, "Procesando")
+
+                            if status_wizard != "ok":
+                                await page_wizard.bring_to_front()
+                                resultados_wizard = await wizard_finalizacion(data_folio, page_wizard)
+                                _log(f"     → WIZARD: {resultados_wizard['status']} - {resultados_wizard['message']}")
+                                df.loc[idx, "Estatus Wizard"] = resultados_wizard["status"]
+                                if status_callback:
+                                    status_callback(idx, resultados_wizard['status'])
+
+                                if resultados_wizard['status'] != "ok":
+                                    continue
+
+                            # Proceso SUGO INFORME
+                            df.at[idx, "Estatus Informe"] = "Procesando"
+                            if status_callback:
+                                status_callback(idx, "Procesando")
+
+                            if status_sugo != "ok":
+                                await page_sugo.bring_to_front()
+                                resultados_informe = await sugo_cierre_operaciones_asig_juridico(data_folio, page_sugo, informes_dir)
+                                _log(f"     → INFORME: {resultados_informe['status']} - {resultados_informe['message']}")
+                                df.loc[idx, "Estatus Informe"] = resultados_informe["status"]
+                                if status_callback:
+                                    status_callback(idx, resultados_informe["status"])
+
 
                         case "sugo-asignacion":
-                            folio_sugo = str(datos.get("Folio Sugo", "")).strip()
-                            resultado = await sugo_asignacion(folio_sugo, page, log_callback=log_callback)
+                            df.at[idx, "Estatus Asignacion"] = "Procesando"
+                            if status_callback:
+                                status_callback(idx, "Procesando")
+
+                            await page_sugo.bring_to_front()
+                            resultados_asignacion = await sugo_asignacion(folio_sugo, page_sugo)
+                            _log(f"     → ASIGNACION: {resultados_asignacion['status']} - {resultados_asignacion['message']}")
+                            df.loc[idx, "Estatus Asignacion"] = resultados_asignacion["status"]
+                            if status_callback:
+                                status_callback(idx, resultados_asignacion["status"])
 
                         case _:
-                            resultado = "Error"
-                            _log(f"  → Tipo de tarea sin handler: '{tipo_tarea}'", error=True)
+                            _log(f"     → Tipo de tarea sin handler: '{tipo_tarea}'", error=True)
 
-                    # ── Persistir resultado en la columna de status de esta tarea ─
-                    df.at[idx, col_status] = resultado
-                    if status_callback:
-                        status_callback(idx, resultado)
-
-                    # ── Log de resultado ──────────────────────────────────────
-                    if resultado in ("Completado", "OK", "Asignado"):
-                        _log(f"  → Folio {folio}: {resultado}", success=True)
-                    elif resultado in ("Omitido INE", "No encontrado"):
-                        _log(f"  → Folio {folio}: {resultado}", warning=True)
-                    elif resultado in ("Error", "ERROR"):
-                        _log(f"  → Folio {folio}: Error inesperado", error=True)
-                    else:
-                        _log(f"  → Folio {folio}: {resultado}")
 
                     # ── Guardado incremental al CSV de progreso ───────────────
-                    if (i + 1) % settings.BATCH_GUARDADO == 0:
-                        df.to_csv(progreso_file, index=False)
-                        _log(f"  Progreso guardado ({i+1}/{total} procesados)")
+                    if (i) % settings.BATCH_GUARDADO == 0:
+                        df.to_csv(settings.TEMP_FILE, index=False)
 
-                # Guardado final
-                df.to_csv(progreso_file, index=False)
-                _log(f"Proceso finalizado. Resultados guardados en: {progreso_file}", success=True)
+            except Exception as e:
+                _log(f"El proceso se interrumpió por un errror en la iteración {i}: {e}", error=True)
 
             finally:
+                # Guardado final
+                df.to_csv(settings.TEMP_FILE, index=False)
+                _log(f"Proceso finalizado. Resultados guardados en: {settings.TEMP_FILE}", success=True)
                 await context.close()
-                if browser:
-                    try:
-                        await browser.close()
-                    except Exception:
-                        pass
 
     except Exception as e:
         _log(f"Error crítico en el proceso: {e}", error=True)
