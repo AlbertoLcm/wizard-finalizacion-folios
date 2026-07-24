@@ -575,10 +575,6 @@ async def orchestrator(
                 args=settings.ARGUMENTOS_CHROME
             )
 
-            for page in context.pages:
-                await page.close()
-
-
             match tipo_tarea:
 
                 case "cierre_oficio":
