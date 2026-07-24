@@ -57,6 +57,8 @@ class BotWizardApp(ctk.CTk):
         self._df = None
         # Columna de status del proceso actualmente en ejecución
         self._col_status_activa: str | None = None
+        # Evento para detener la ejecución
+        self._cancel_event = threading.Event()
 
         # Limpiar DIST al iniciar el programa (solo una vez al arrancar)
         preparar_entorno()
@@ -67,8 +69,8 @@ class BotWizardApp(ctk.CTk):
 
         self.grid_columnconfigure(0, weight=3, minsize=280)
         self.grid_columnconfigure(1, weight=7, minsize=480)
-        self.grid_rowconfigure(0, weight=5, minsize=260)  # Grid
-        self.grid_rowconfigure(1, weight=4, minsize=200)  # Logs
+        self.grid_rowconfigure(0, weight=4, minsize=200)  # Grid (sin stats usa menos espacio)
+        self.grid_rowconfigure(1, weight=6, minsize=260)  # Logs (Terminal ampliada)
         self.grid_rowconfigure(2, weight=0)               # Bottom bar
 
         # ==========================================
@@ -95,7 +97,12 @@ class BotWizardApp(ctk.CTk):
         # ==========================================
         # --- PANEL DERECHO INFERIOR (LOGS) ---
         # ==========================================
-        self.panel_logs = PanelLogs(self, icon_trash=self.icon_trash)
+        self.panel_logs = PanelLogs(
+            self, 
+            icon_trash=self.icon_trash,
+            icon_stop=self.icon_off,
+            cmd_stop=self.cmd_detener
+        )
         self.panel_logs.grid(row=1, column=1, padx=(8, 12), pady=(6, 8), sticky="nsew")
 
         # ==========================================
@@ -143,6 +150,7 @@ class BotWizardApp(ctk.CTk):
     def _set_ui_bloqueada(self, bloqueada: bool):
         """Bloquea o desbloquea la UI (thread-safe)."""
         self.after(0, lambda: self.panel_izq.bloquear_ui(bloqueada))
+        self.after(0, lambda: self.panel_logs.set_btn_stop_state(bloqueada))
 
     def _set_estado(self, msg, color=settings.COLOR_GREEN, is_processing=False):
         """Actualiza el estado inferior (thread-safe)."""
@@ -217,6 +225,7 @@ class BotWizardApp(ctk.CTk):
             self._set_ui_bloqueada(True)
             self.after(0, lambda: self.panel_grid.set_col_status_activa(self._col_status_activa))
 
+            self._cancel_event.clear()
             coro = orchestrator(
                 df=self._df,
                 tipo_tarea="asignacion",
@@ -225,6 +234,7 @@ class BotWizardApp(ctk.CTk):
                 done_callback=self._on_proceso_terminado,
                 informes_dir="",
                 status_callback=self._update_row_status,
+                cancel_event=self._cancel_event,
             )
             self._ejecutar_en_hilo(coro)
 
@@ -244,6 +254,7 @@ class BotWizardApp(ctk.CTk):
             self._set_ui_bloqueada(True)
             self.after(0, lambda: self.panel_grid.set_col_status_activa(self._col_status_activa))
 
+            self._cancel_event.clear()
             coro = orchestrator(
                 df=self._df,
                 tipo_tarea="cierre_oficio",
@@ -252,10 +263,17 @@ class BotWizardApp(ctk.CTk):
                 done_callback=self._on_proceso_terminado,
                 informes_dir=self.informes_path or "",
                 status_callback=self._update_row_status,
+                cancel_event=self._cancel_event,
             )
             self._ejecutar_en_hilo(coro)
 
         self._verificar_progreso_y_ejecutar(_iniciar)
+
+    def cmd_detener(self):
+        """Activa el flag de cancelación para detener el proceso en curso."""
+        self._log("Señal de detención enviada. Esperando a que el proceso actual finalice su iteración...", warning=True)
+        self._cancel_event.set()
+        self.panel_logs.set_btn_stop_state(False)
 
     # ==========================================
     # CALLBACKS DE SELECCIÓN DE ENTRADAS

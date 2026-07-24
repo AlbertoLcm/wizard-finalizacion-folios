@@ -4,7 +4,7 @@ from app.config import settings
 
 
 class PanelLogs(ctk.CTkFrame):
-    def __init__(self, master, icon_trash):
+    def __init__(self, master, icon_trash, icon_stop=None, cmd_stop=None):
         # Inicializamos el Frame con los colores de settings
         super().__init__(master, fg_color=settings.COLOR_MIDNIGHT, corner_radius=15)
         
@@ -28,6 +28,16 @@ class PanelLogs(ctk.CTkFrame):
             command=self.limpiar_logs
         )
         self.btn_clear.pack(side="right", padx=(15, 0))
+
+        if icon_stop and cmd_stop:
+            self.btn_stop = ctk.CTkButton(
+                self.frame_log_header, text="Detener", width=80, height=28,
+                image=icon_stop, compound="left",
+                fg_color="#FF4B4B", text_color="white", hover_color="#CC3C3C",
+                command=cmd_stop, corner_radius=8,
+                state="disabled" # Starts disabled
+            )
+            self.btn_stop.pack(side="right", padx=(15, 0))
 
         self.linea_cian_der = ctk.CTkFrame(self.frame_log_header, width=30, height=3, fg_color=settings.COLOR_CYAN, corner_radius=2)
         self.linea_cian_der.pack(side="right")
@@ -83,3 +93,7 @@ class PanelLogs(ctk.CTkFrame):
         self.txt_logs.delete("1.0", "end")
         self.txt_logs.configure(state="disabled")
         self.agregar_log("Registro limpiado.", success=True)
+
+    def set_btn_stop_state(self, is_running: bool):
+        if hasattr(self, 'btn_stop'):
+            self.btn_stop.configure(state="normal" if is_running else "disabled")

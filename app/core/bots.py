@@ -11,6 +11,7 @@ from pathlib import Path
 import sys
 import json
 import shutil
+import threading
 
 # ================================================
 #           Utils
@@ -543,6 +544,7 @@ async def orchestrator(
     log_callback: Optional[Callable] = None,
     done_callback: Optional[Callable] = None,
     status_callback: Optional[Callable[[int, str], None]] = None,
+    cancel_event: Optional[threading.Event] = None,
 ):
     def _log(msg, **kw):
         if log_callback:
@@ -609,6 +611,10 @@ async def orchestrator(
 
             try:
                 for i, (idx, row) in enumerate(pending_folios.iterrows(), start=1):
+                    if cancel_event and cancel_event.is_set():
+                        _log("Proceso detenido por el usuario.", warning=True)
+                        break
+
                     data_folio = row.to_dict()
 
                     folio_sugo = data_folio.get("Folio Sugo", "")
