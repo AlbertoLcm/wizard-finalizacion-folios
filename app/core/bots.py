@@ -243,6 +243,12 @@ async def wizard_finalizacion(datos: dict, page: Page):
             "message": "Folio INE fue omitido."
         }
 
+    if 'sugo' in folio_wizard.strip().lower():
+        return {
+            "status": "ok",
+            "message": "Es un folio SUGO, omitiendo cierre en WIZARD"
+        }
+
     try:
         for intento in range(2):
             await page.goto(settings.URL_WIZARD_MIS_TAREAS, timeout=80_000)
