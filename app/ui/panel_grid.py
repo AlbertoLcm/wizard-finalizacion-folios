@@ -29,18 +29,6 @@ class PanelGrid(ctk.CTkFrame):
         self.linea_decorativa = ctk.CTkFrame(self, height=1, fg_color="#E2E8F0")
         self.linea_decorativa.pack(fill="x", padx=25, pady=(0, 10))
 
-        # --- Estadísticas ---
-        self.frame_stats = ctk.CTkFrame(self, fg_color="transparent")
-        self.frame_stats.pack(fill="x", padx=25, pady=(0, 15))
-
-        for c in range(4):
-            self.frame_stats.grid_columnconfigure(c, weight=1, uniform="stat_cols")
-
-        self.card_total      = self._crear_stat_card(self.frame_stats, 0, "Total",      "0", "#64748B", "#F1F5F9")
-        self.card_pendientes = self._crear_stat_card(self.frame_stats, 1, "Pendientes", "0", "#475569", "#F8FAFC")
-        self.card_procesados = self._crear_stat_card(self.frame_stats, 2, "Procesados", "0", "#065F46", "#F0FDF4")
-        self.card_errores    = self._crear_stat_card(self.frame_stats, 3, "Con Error",  "0", "#991B1B", "#FEF2F2")
-
         # --- Contenedor de la Tabla ---
         self.frame_table = ctk.CTkFrame(self, fg_color="transparent", border_width=0)
         self.frame_table.pack(fill="both", expand=True, padx=25, pady=(0, 20))
@@ -73,7 +61,7 @@ class PanelGrid(ctk.CTkFrame):
         self.col_status_activa = None
 
         # Treeview vacío de arranque
-        self._rebuild_tree(["Estatus"])
+        self._rebuild_tree(["Estatus Asignacion", "Estatus Wizard", "Estatus Informe"])
 
     # =========================================================
     # CONSTRUCCIÓN / RECONSTRUCCIÓN DEL TREEVIEW
@@ -117,8 +105,8 @@ class PanelGrid(ctk.CTkFrame):
 
         # Configurar columnas
         for col in self._tree_cols:
-            if col == "Estatus":
-                self.tree.heading(col, text="Estatus", anchor="center")
+            if col.startswith("Estatus"):
+                self.tree.heading(col, text=col, anchor="center")
                 self.tree.column(col, width=130, minwidth=90, anchor="center", stretch=False)
             else:
                 w = self._ancho_columna(col)
@@ -147,19 +135,6 @@ class PanelGrid(ctk.CTkFrame):
     # HELPERS
     # =========================================================
 
-    def _crear_stat_card(self, parent, column, title, val, text_color, bg_color):
-        card = ctk.CTkFrame(parent, fg_color=bg_color, corner_radius=10,
-                            border_width=1, border_color="#E2E8F0")
-        card.grid(row=0, column=column, padx=5, sticky="nsew")
-        ctk.CTkLabel(card, text=title,
-                     font=ctk.CTkFont(family="Roboto", size=11, weight="bold"),
-                     text_color="#64748B").pack(anchor="w", padx=12, pady=(8, 2))
-        lbl_val = ctk.CTkLabel(card, text=val,
-                               font=ctk.CTkFont(family="Roboto", size=20, weight="bold"),
-                               text_color=text_color)
-        lbl_val.pack(anchor="w", padx=12, pady=(0, 8))
-        return lbl_val
-
     def _tag_para_status(self, status: str, row_index: int) -> str:
         s = status.lower()
         if "pendiente" in s or s == "":
@@ -175,83 +150,52 @@ class PanelGrid(ctk.CTkFrame):
         return "evenrow" if row_index % 2 == 0 else "oddrow"
 
     # =========================================================
-    # ESTADÍSTICAS
-    # =========================================================
-
-    def recalcular_estadisticas(self):
-        """Cuenta sobre la columna Estatus (siempre índice 0)."""
-        total = pendientes = procesados = errores = 0
-        for item in self.tree.get_children():
-            total += 1
-            valores = self.tree.item(item, "values")
-            if valores:
-                s = str(valores[0]).lower()
-                if "pendiente" in s or s == "":
-                    pendientes += 1
-                elif "error" in s:
-                    errores += 1
-                else:
-                    procesados += 1
-        self.card_total.configure(text=str(total))
-        self.card_pendientes.configure(text=str(pendientes))
-        self.card_procesados.configure(text=str(procesados))
-        self.card_errores.configure(text=str(errores))
-
-    # =========================================================
     # API PÚBLICA
     # =========================================================
 
     def set_col_status_activa(self, col_status: str):
         """Cambia la columna de status activa (llamado por main_window al iniciar un proceso)."""
         self.col_status_activa = col_status
-        self.recalcular_estadisticas()
 
     def cargar_datos(self, df, col_status: str = None):
         """Reconstruye la tabla con TODAS las columnas del DataFrame.
 
-        La primera columna siempre es «Estatus» y muestra el valor de
-        col_status (o col_status_activa). El resto de columnas del DataFrame
-        se añaden en el orden en que aparecen, excluyendo las columnas
-        internas de status.
-
+        Las columnas de Estatus se muestran al inicio.
+        
         Args:
             df:         DataFrame con los datos.
-            col_status: columna del DataFrame cuyo valor se muestra como Estatus.
+            col_status: columna del DataFrame que representa el proceso activo.
         """
         self.col_status_activa = col_status or self.col_status_activa
         self.row_items.clear()
 
         if df is None or df.empty:
             self.lbl_count.configure(text="0 registros")
-            self._rebuild_tree(["Estatus"])
-            self.recalcular_estadisticas()
+            self._rebuild_tree(["Estatus Asignacion", "Estatus Wizard", "Estatus Informe"])
             return
 
-        # Columnas internas de status que NO se muestran como columna separada
-        STATUS_COLS = {
-            "Status SUGO Asignacion",
-            "Status WIZARD Finalizacion",
-            "Status SUGO Informe",
-        }
-        data_cols = [c for c in df.columns if c not in STATUS_COLS]
+        # Organizar columnas: Los tres Estatus primero, luego el resto
+        status_cols = ["Estatus Asignacion", "Estatus Wizard", "Estatus Informe"]
+        # Make sure they actually exist in the df, though they should be initialized
+        status_cols = [c for c in status_cols if c in df.columns] 
+        data_cols = [c for c in df.columns if c not in status_cols]
 
-        # Reconstruir Treeview con Estatus primero + todas las columnas de datos
-        self._rebuild_tree(["Estatus"] + data_cols)
+        self._tree_cols = status_cols + data_cols
+
+        # Reconstruir Treeview
+        self._rebuild_tree(self._tree_cols)
         self.lbl_count.configure(text=f"{len(df)} registros")
 
-        # Resolver columna de status a mostrar
         col_stat = self.col_status_activa
         if not col_stat or col_stat not in df.columns:
-            for c in ("Status SUGO Asignacion", "Status WIZARD Finalizacion", "Status SUGO Informe"):
-                if c in df.columns:
-                    col_stat = c
-                    break
+            if status_cols:
+                col_stat = status_cols[0]
 
         for idx, row in df.iterrows():
             val_status = str(row.get(col_stat, "Pendiente")).strip() if col_stat else "Pendiente"
 
             data_vals = []
-            for col in data_cols:
+            for col in self._tree_cols:
                 v = str(row.get(col, "")).strip()
                 if v.endswith(".0"):
                     v = v[:-2]
@@ -259,35 +203,38 @@ class PanelGrid(ctk.CTkFrame):
 
             item_id = self.tree.insert(
                 "", "end",
-                values=tuple([val_status] + data_vals)
+                values=tuple(data_vals)
             )
             self.row_items[idx] = item_id
             self.tree.item(item_id, tags=(self._tag_para_status(val_status, idx),))
 
-        self.recalcular_estadisticas()
-
     def actualizar_estatus(self, row_index, nuevo_estatus, col_status: str = None):
-        """Actualiza la columna Estatus (índice 0) de una fila en tiempo real."""
+        """Actualiza la columna de Estatus específica de una fila en tiempo real."""
         if row_index not in self.row_items:
             return
 
         item_id = self.row_items[row_index]
         valores = list(self.tree.item(item_id, "values"))
 
-        if valores:
-            valores[0] = nuevo_estatus
-        else:
-            valores = [nuevo_estatus]
-
-        self.tree.item(item_id, values=valores)
-        self.tree.item(item_id, tags=(self._tag_para_status(nuevo_estatus, row_index),))
-        self.tree.see(item_id)
-        self.tree.selection_set(item_id)
-        self.recalcular_estadisticas()
+        col = col_status or self.col_status_activa
+        if col in self._tree_cols:
+            col_idx = self._tree_cols.index(col)
+            # Asegurar que la lista de valores tiene la longitud suficiente
+            while len(valores) <= col_idx:
+                valores.append("")
+                
+            valores[col_idx] = nuevo_estatus
+            self.tree.item(item_id, values=valores)
+            
+            # Solo cambiar el color si estamos actualizando la columna activa
+            if col == self.col_status_activa:
+                self.tree.item(item_id, tags=(self._tag_para_status(nuevo_estatus, row_index),))
+                
+            self.tree.see(item_id)
+            self.tree.selection_set(item_id)
 
     def limpiar_tabla(self):
         """Elimina todas las filas de la tabla."""
         for item in self.tree.get_children():
             self.tree.delete(item)
         self.row_items.clear()
-        self.recalcular_estadisticas()

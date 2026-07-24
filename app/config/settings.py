@@ -1,8 +1,11 @@
 import sys
 from pathlib import Path
 
-# ── DETECTAR SI ES UN EJECUTABLE (.EXE) O MODO DESARROLLO ──
-IS_FROZEN = getattr(sys, 'frozen', False)
+# =========================================
+# Files program
+# =========================================
+
+IS_FROZEN = getattr(sys, 'frozen', False) # Detecta si es ejecutable Exe o Desarrollo
 
 if IS_FROZEN:
     BASE_DIR = Path(sys.executable).parent
@@ -14,21 +17,51 @@ else:
 
 DIST_DIR = BASE_DIR / "dist"
 INPUT_FILE = BASE_DIR / "Oficios.xlsx"
-
-DOCUMENTS_UPLOAD = DIST_DIR / "Documentos"
-FILE_EXITOS       = DIST_DIR / "resultados_procesados.csv"
-USER_DATA_DIR     = DIST_DIR / "perfil_google_drive"
-
+ARCHIVO_CREDENCIALES = "usuario_sugo.json" 
+USER_DATA_DIR = DIST_DIR / "perfil_google_drive"
 ASSETS_DIR = INTERNAL_DIR / "app" / "assets"
+TEMP_FILE = DIST_DIR / "resultados_temp.csv"
+FILE_EXITOS = DIST_DIR / "resultados_procesados.xlsx"
 
 BATCH_GUARDADO = 10
 
-# URLs
+COLUMNS_REQUIRED = [
+    "Folio Sugo",
+    "Folio Wizard",
+    "Tipo Respuesta",
+    "Selfservice",
+    "Dictamen Wizard",
+    "Fecha Cierre"
+]
+
+# =========================================
+# Params Playwright
+# =========================================
+
+URL_WIZARD = "https://bbva-wizardautomexpress-am.appspot.com/welcome-page"
 URL_WIZARD_MIS_TAREAS = "https://bbva-wizardautomexpress-am.appspot.com/wizardautomexpr-am/manager/manager-tasks"
-URL_LOGIN             = "https://acprod.intranet.com.mx/mbom_mx_ws/mbom_mx_web/PortalLogon"
+URL_SUGO_LOGIN = "https://acprod.intranet.com.mx/mbom_mx_ws/mbom_mx_web/PortalLogon"
 URL_CIERRE_OPERACIONES = "https://acprod.intranet.com.mx:443/boixp_mx_web/boixp_mx_web/servlet/ServletOperacionWeb?OPERACION=VGOMX064&LOCALE=es_ES&DATOS_ENTRADA.FLUJO_LANZAR=GOMXFL15240"
-URL_SUGO              = "https://acprod.intranet.com.mx/mbom_mx_ws/mbom_mx_web/mbom_mx_web_jsp/portal3.jsp"
+URL_SUGO = "https://acprod.intranet.com.mx/mbom_mx_ws/mbom_mx_web/mbom_mx_web_jsp/portal3.jsp"
 URL_ASIGNACION_SUGO = "https://acprod.intranet.com.mx:443/boixp_mx_web/boixp_mx_web/servlet/ServletOperacionWeb?OPERACION=VGOMX021&LOCALE=es_ES&DATOS_ENTRADA.FLUJO_LANZAR=GOMXFL13020"
+URL_LOGIN_GOOGLE = "https://accounts.google.com/"
+
+ARGUMENTOS_CHROME = [
+    "--ignore-certificate-errors",
+    "--disable-blink-features=AutomationControlled",
+    "--disable-gpu",
+    "--no-sandbox",
+    "--no-first-run",             
+    "--no-default-browser-check", 
+    "--disable-sync",             
+    "--disable-popup-blocking",
+    "--disable-signin-promo",
+    "--disable-features=ChromeSigninInterceptBubble,DiceWebSigninIntercept"
+]
+
+# =========================================
+# UI program
+# =========================================
 
 APP_TITLE = "Bot Wizard - Finalización Folios"
 APP_GEOMETRY = "1000x650"

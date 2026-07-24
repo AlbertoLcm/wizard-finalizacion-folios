@@ -39,6 +39,13 @@ jobs:
         # Copiar el Excel usando rutas relativas explícitas
         Copy-Item -Path .\Oficios.xlsx -Destination entregable\
 
+        # Crear el archivo usuario_sugo.json con campos vacíos
+        $datos = @{
+            user = ""
+            password = ""
+        }
+        $datos | ConvertTo-Json | Out-File -FilePath "entregable\usuario_sugo.json" -Encoding utf8
+
     - name: Guardar el entregable como Artefacto (ZIP)
       uses: actions/upload-artifact@v4
       with:
