@@ -20,7 +20,7 @@ INPUT_FILE = BASE_DIR / "Oficios.xlsx"
 ARCHIVO_CREDENCIALES = "usuario_sugo.json" 
 USER_DATA_DIR = DIST_DIR / "perfil_google_drive"
 ASSETS_DIR = INTERNAL_DIR / "app" / "assets"
-TEMP_FILE = BASE_DIR / "resultados_temp.csv"
+TEMP_FILE = DIST_DIR / "resultados_temp.csv"
 FILE_EXITOS = DIST_DIR / "resultados_procesados.xlsx"
 
 BATCH_GUARDADO = 10

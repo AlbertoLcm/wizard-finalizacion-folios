@@ -47,7 +47,7 @@ class PanelControls(ctk.CTkFrame):
         self.frame_folder.pack(fill="x", padx=20, pady=2)
         
         self.lbl_folder_title = ctk.CTkLabel(
-            self.frame_folder, text="Carpeta de Informes (Opcional):",
+            self.frame_folder, text="Carpeta de Informes:",
             font=ctk.CTkFont(size=10), text_color=settings.COLOR_TEXT_MUTED
         )
         self.lbl_folder_title.pack(anchor="w")

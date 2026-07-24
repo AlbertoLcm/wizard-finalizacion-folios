@@ -495,7 +495,7 @@ async def load_page_sugo(context: BrowserContext, user: str, password: str) -> O
     page_sugo = await context.new_page()
 
     try:
-        async with context.expect_page(timeout=3_000) as page_info:
+        async with context.expect_page(timeout=2_000) as page_info:
             await page_sugo.goto(settings.URL_SUGO_LOGIN, timeout=10_000)
 
         popup = await page_info.value
@@ -526,7 +526,7 @@ async def load_page_sugo(context: BrowserContext, user: str, password: str) -> O
             await page_sugo.goto(settings.URL_SUGO, timeout=5_000)
             await page_sugo.wait_for_load_state("domcontentloaded")
 
-        except Exception as e:
+        except Exception:
             return None
 
     return page_sugo
@@ -599,7 +599,7 @@ async def orchestrator(
                     pending_folios = df[df['Estatus Asignacion'] != "ok"]
                     total_pending = len(pending_folios)
 
-                    # Abrimos solo la pestaña
+                    # Abrimos solo la pestaña SUGO
                     page_sugo = await load_page_sugo(context, user, password)
 
                     if not page_sugo:

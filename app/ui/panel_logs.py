@@ -32,8 +32,9 @@ class PanelLogs(ctk.CTkFrame):
         if icon_stop and cmd_stop:
             self.btn_stop = ctk.CTkButton(
                 self.frame_log_header, text="Detener", width=80, height=28,
-                image=icon_stop, compound="left",
-                fg_color="#FF4B4B", text_color="white", hover_color="#CC3C3C",
+                fg_color="#e6b8af", border_width=1, border_color="#a61c00",
+                hover_color="#dd7e6b", text_color="#a61c00",
+                text_color_disabled="#a61c00",
                 command=cmd_stop, corner_radius=8,
                 state="disabled" # Starts disabled
             )
