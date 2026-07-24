@@ -12,7 +12,6 @@ from app.core.bots import preparar_entorno, cargar_datos, orchestrator
 from app.ui.panel_logs import PanelLogs
 from app.ui.panel_controls import PanelControls
 from app.ui.panel_grid import PanelGrid
-from app.ui.dialog_login import DialogLogin
 from app.ui.dialog_resume import DialogResume
 
 
@@ -54,9 +53,13 @@ class BotWizardApp(ctk.CTk):
         # Variables de estado
         self.excel_path = None
         self.informes_path = None
+        # DataFrame cargado en memoria; se reutiliza mientras el programa esté abierto
+        self._df = None
         # Columna de status del proceso actualmente en ejecución
-        # (determina qué columna de la tabla se resalta y cuenta en las tarjetas)
         self._col_status_activa: str | None = None
+
+        # Limpiar DIST al iniciar el programa (solo una vez al arrancar)
+        preparar_entorno()
 
         # ==========================================
         # --- INTERFAZ ---
@@ -64,23 +67,21 @@ class BotWizardApp(ctk.CTk):
 
         self.grid_columnconfigure(0, weight=3, minsize=280)
         self.grid_columnconfigure(1, weight=7, minsize=480)
-        self.grid_rowconfigure(0, weight=5, minsize=260) # Grid
-        self.grid_rowconfigure(1, weight=4, minsize=200) # Logs
-        self.grid_rowconfigure(2, weight=0)              # Bottom bar
+        self.grid_rowconfigure(0, weight=5, minsize=260)  # Grid
+        self.grid_rowconfigure(1, weight=4, minsize=200)  # Logs
+        self.grid_rowconfigure(2, weight=0)               # Bottom bar
 
         # ==========================================
         # --- PANEL IZQUIERDO (CONTROLES) ---
         # ==========================================
-        
+
         self.panel_izq = PanelControls(
             self,
             image_logo=self.img_bbva,
             icon_off=self.icon_off,
-            cmd_login=self.cmd_login,
-            cmd_exit=self.destroy,
-            cmd_sugo=self.cmd_sugo,
-            cmd_wizard=self.cmd_wizard,
             cmd_asignacion=self.cmd_asignacion,
+            cmd_cierre_oficio=self.cmd_cierre_oficio,
+            cmd_exit=self.destroy,
             cmd_folder_selected=self.on_folder_selected,
         )
         self.panel_izq.grid(row=0, column=0, rowspan=2, padx=(12, 8), pady=(12, 8), sticky="nsew")
@@ -112,19 +113,21 @@ class BotWizardApp(ctk.CTk):
         self.lbl_brand_left.pack(side="left", padx=20)
 
         self.lbl_brand_right = ctk.CTkLabel(
-            self.panel_bottom, text="  Atención Autoridades  ", 
+            self.panel_bottom, text="  Atención Autoridades  ",
             image=self.img_bbva_white, compound="left",
             font=ctk.CTkFont(size=12), text_color="white"
         )
         self.lbl_brand_right.pack(side="right", padx=20)
 
-        # Cargar valores por defecto si existen
+        # Cargar datos del Excel de entrada si existe
         if os.path.exists(settings.INPUT_FILE):
             self.excel_path = str(settings.INPUT_FILE)
             self.cargar_datos_excel()
 
-        if os.path.exists(settings.DOCUMENTS_UPLOAD):
-            self.informes_path = str(settings.DOCUMENTS_UPLOAD)
+        # Restaurar carpeta de informes si settings la define
+        documents_upload = getattr(settings, "DOCUMENTS_UPLOAD", None)
+        if documents_upload and os.path.exists(documents_upload):
+            self.informes_path = str(documents_upload)
             self.panel_izq.set_folder_path(self.informes_path)
 
         self.panel_logs.agregar_log("Sistema RPA's Especiales iniciado correctamente.", success=True)
@@ -163,13 +166,17 @@ class BotWizardApp(ctk.CTk):
         hilo = threading.Thread(target=_runner, daemon=True)
         hilo.start()
 
+    def _get_progreso_path(self):
+        return str(settings.TEMP_FILE)
+
     # ==========================================
     # EVENTOS DE LOS BOTONES
     # ==========================================
 
     def _verificar_progreso_y_ejecutar(self, ejecutar_callback):
-        if not self.excel_path:
-            self._log("Por favor, seleccione un archivo Excel de entrada antes de iniciar.", error=True)
+        """Verifica si existe un archivo de progreso y ofrece reanudar o empezar de cero."""
+        if self._df is None:
+            self._log("No hay datos cargados. Verifique que el archivo Oficios.xlsx exista.", error=True)
             return
 
         progreso_file = self._get_progreso_path()
@@ -185,6 +192,7 @@ class BotWizardApp(ctk.CTk):
                     self._log("Progreso anterior eliminado. Iniciando desde cero...", success=True)
                 except Exception as e:
                     self._log(f"No se pudo limpiar el progreso anterior: {e}", error=True)
+                # Recargar datos frescos del Excel original
                 self.cargar_datos_excel()
                 ejecutar_callback()
 
@@ -195,103 +203,59 @@ class BotWizardApp(ctk.CTk):
         else:
             ejecutar_callback()
 
-    def cmd_wizard(self):
-        """Botón 2 — Cierre Folio Wizard."""
-        def _iniciar_wizard():
-            self._col_status_activa = "Status WIZARD Finalizacion"
+    def cmd_asignacion(self):
+        """Botón Asignación — Asignación de folios en SUGO."""
+        def _iniciar():
+            if self._df is None:
+                self._log("No hay datos cargados.", error=True)
+                return
+            self._col_status_activa = "Estatus Asignacion"
             modo_oculto = self.panel_izq.get_modo_oculto()
             modo_txt = "oculto (headless)" if modo_oculto else "visible"
-            self._log(f"Iniciando Cierre Folio Wizard en modo {modo_txt}...")
-            self._set_estado("Ejecutando Wizard...", color=settings.COLOR_CYAN, is_processing=True)
+            self._log(f"Iniciando proceso de Asignación en modo {modo_txt}...")
+            self._set_estado("Ejecutando Asignación...", color=settings.COLOR_CYAN, is_processing=True)
             self._set_ui_bloqueada(True)
             self.after(0, lambda: self.panel_grid.set_col_status_activa(self._col_status_activa))
 
             coro = orchestrator(
-                tipo_tarea="wizard-finalizacion",
+                df=self._df,
+                tipo_tarea="asignacion",
                 modo_oculto=modo_oculto,
                 log_callback=self._log,
                 done_callback=self._on_proceso_terminado,
-                excel_path=self.excel_path,
-                informes_dir=self.informes_path,
+                informes_dir="",
                 status_callback=self._update_row_status,
             )
             self._ejecutar_en_hilo(coro)
 
-        self._verificar_progreso_y_ejecutar(_iniciar_wizard)
+        self._verificar_progreso_y_ejecutar(_iniciar)
 
-    def cmd_asignacion(self):
-        """Botón Asignación — Asignación SUGO de folios."""
-        def _iniciar_asignacion():
-            self._log("Preparando proceso SUGO. Solicitando credenciales...")
-            self._set_estado("Esperando credenciales...", color=settings.COLOR_CYAN, is_processing=True)
+    def cmd_cierre_oficio(self):
+        """Botón Cierre Oficio — Flujo combinado: Wizard + adjuntar informe SUGO."""
+        def _iniciar():
+            if self._df is None:
+                self._log("No hay datos cargados.", error=True)
+                return
+            self._col_status_activa = "Estatus Wizard"
+            modo_oculto = self.panel_izq.get_modo_oculto()
+            modo_txt = "oculto (headless)" if modo_oculto else "visible"
+            self._log(f"Iniciando Cierre Oficio en modo {modo_txt}...")
+            self._set_estado("Ejecutando Cierre Oficio...", color=settings.COLOR_CYAN, is_processing=True)
             self._set_ui_bloqueada(True)
+            self.after(0, lambda: self.panel_grid.set_col_status_activa(self._col_status_activa))
 
-            def _on_credenciales_ok(user: str, password: str):
+            coro = orchestrator(
+                df=self._df,
+                tipo_tarea="cierre_oficio",
+                modo_oculto=modo_oculto,
+                log_callback=self._log,
+                done_callback=self._on_proceso_terminado,
+                informes_dir=self.informes_path or "",
+                status_callback=self._update_row_status,
+            )
+            self._ejecutar_en_hilo(coro)
 
-                self._col_status_activa = "Status SUGO Asignacion"
-                modo_oculto = self.panel_izq.get_modo_oculto()
-                modo_txt = "oculto (headless)" if modo_oculto else "visible"
-                self._log(f"Iniciando proceso de Asignación en modo {modo_txt}...")
-                self._set_estado("Ejecutando Asignación...", color=settings.COLOR_CYAN, is_processing=True)
-                self._set_ui_bloqueada(True)
-                self.after(0, lambda: self.panel_grid.set_col_status_activa(self._col_status_activa))
-
-                coro = orchestrator(
-                    tipo_tarea="sugo-asignacion",
-                    modo_oculto=modo_oculto,
-                    log_callback=self._log,
-                    done_callback=self._on_proceso_terminado,
-                    user=user,
-                    password=password,
-                    excel_path=self.excel_path,
-                    informes_dir=self.informes_path,
-                    status_callback=self._update_row_status,
-                )
-                self._ejecutar_en_hilo(coro)
-
-            def _on_cancelado():
-                self._log("Proceso SUGO cancelado por el usuario.", warning=True)
-                self._on_proceso_terminado()
-
-            DialogLogin(self, callback_ok=_on_credenciales_ok, callback_cancel=_on_cancelado)
-
-        self._verificar_progreso_y_ejecutar(_iniciar_asignacion)
-
-    def cmd_sugo(self):
-        """Botón 3 — Adjuntar Informe SUGO (pide credenciales primero)."""
-        def _iniciar_sugo():
-            self._log("Preparando proceso SUGO. Solicitando credenciales...")
-            self._set_estado("Esperando credenciales...", color=settings.COLOR_CYAN, is_processing=True)
-            self._set_ui_bloqueada(True)
-
-            def _on_credenciales_ok(user: str, password: str):
-                self._col_status_activa = "Status SUGO Informe"
-                modo_oculto = self.panel_izq.get_modo_oculto()
-                modo_txt = "oculto (headless)" if modo_oculto else "visible"
-                self._log(f"Credenciales recibidas. Iniciando SUGO en modo {modo_txt}...")
-                self._set_estado("Adjuntando informe SUGO...", color=settings.COLOR_CYAN, is_processing=True)
-                self.after(0, lambda: self.panel_grid.set_col_status_activa(self._col_status_activa))
-
-                coro = orchestrator(
-                    tipo_tarea="sugo-informe",
-                    modo_oculto=modo_oculto,
-                    log_callback=self._log,
-                    done_callback=self._on_proceso_terminado,
-                    user=user,
-                    password=password,
-                    excel_path=self.excel_path,
-                    informes_dir=self.informes_path,
-                    status_callback=self._update_row_status,
-                )
-                self._ejecutar_en_hilo(coro)
-
-            def _on_cancelado():
-                self._log("Proceso SUGO cancelado por el usuario.", warning=True)
-                self._on_proceso_terminado()
-
-            DialogLogin(self, callback_ok=_on_credenciales_ok, callback_cancel=_on_cancelado)
-
-        self._verificar_progreso_y_ejecutar(_iniciar_sugo)
+        self._verificar_progreso_y_ejecutar(_iniciar)
 
     # ==========================================
     # CALLBACKS DE SELECCIÓN DE ENTRADAS
@@ -302,25 +266,29 @@ class BotWizardApp(ctk.CTk):
         self._log(f"Carpeta de informes seleccionada: {path}")
 
     def cargar_datos_excel(self):
-        """Carga el Excel y lo muestra en el panel de grid."""
+        """Carga el Excel (o el CSV temporal si existe) y lo muestra en el panel de grid.
+        
+        NO limpia DIST aquí; eso solo ocurre al arrancar el programa.
+        Si existe un TEMP_FILE lo usa directamente para reutilizar el progreso de la sesión.
+        """
         if not self.excel_path:
             return
 
         try:
-            col_status_default = "Status SUGO Asignacion"
+            col_status_default = "Estatus Asignacion"
 
-            preparar_entorno()
-
-            df = cargar_datos(log_callback=self._log,)
-            
+            df = cargar_datos(log_callback=self._log)
 
             if df is not None:
+                self._df = df  # Guardar referencia en memoria para reutilización en sesión
                 self.panel_grid.cargar_datos(df, col_status=col_status_default)
                 self._log(f"Se cargaron {len(df)} registros en la tabla.", success=True)
             else:
+                self._df = None
                 self.panel_grid.limpiar_tabla()
         except Exception as e:
             self._log(f"Error al cargar datos del Excel: {e}", error=True)
+            self._df = None
             self.panel_grid.limpiar_tabla()
 
     def _update_row_status(self, idx, status):

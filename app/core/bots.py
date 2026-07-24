@@ -108,8 +108,9 @@ def cargar_datos(log_callback):
             print(msg)
 
     if Path(settings.TEMP_FILE).exists():
+        _log("Archivo temporal encontrado. Cargando progreso previo...", )
         df = pd.read_csv(settings.TEMP_FILE)
-        
+
     else:
         df = pd.read_excel(settings.INPUT_FILE)
 
@@ -126,6 +127,8 @@ def cargar_datos(log_callback):
 
         nuevas_columnas = ["Estatus Asignacion", "Estatus Wizard", "Estatus Informe"]
         df[nuevas_columnas] = "pendiente"
+
+    return df
 
 # =========================================
 # Funciones de ejecución de procesos
@@ -615,7 +618,7 @@ async def orchestrator(
                     # ── Despacho del handler (switch por tipo_tarea) ──────────
                     match tipo_tarea:
 
-                        case "wizard-finalizacion":
+                        case "cierre_oficio":
                             status_wizard = data_folio.get("Estatus Wizard")
                             status_sugo = data_folio.get("Estatus Informe")
 
@@ -649,7 +652,7 @@ async def orchestrator(
                                     status_callback(idx, resultados_informe["status"])
 
 
-                        case "sugo-asignacion":
+                        case "asignacion":
                             df.at[idx, "Estatus Asignacion"] = "Procesando"
                             if status_callback:
                                 status_callback(idx, "Procesando")

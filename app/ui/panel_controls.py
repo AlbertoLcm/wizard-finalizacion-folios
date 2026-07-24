@@ -3,7 +3,7 @@ from app.config import settings
 
 
 class PanelControls(ctk.CTkFrame):
-    def __init__(self, master, image_logo, icon_off, cmd_login, cmd_wizard, cmd_sugo, cmd_asignacion, cmd_exit, cmd_folder_selected):
+    def __init__(self, master, image_logo, icon_off, cmd_asignacion, cmd_cierre_oficio, cmd_exit, cmd_folder_selected):
         super().__init__(master, fg_color=settings.COLOR_WHITE, corner_radius=15, border_width=0)
 
         self.cmd_folder_selected = cmd_folder_selected
@@ -75,17 +75,11 @@ class PanelControls(ctk.CTkFrame):
         self.linea_separadora.pack(fill="x", padx=20, pady=(8, 6))
 
         # Botones de Acción usando los Callbacks recibidos por parámetro
-        self.btn_asignacion = self.crear_boton(" Asignación SUGO", cmd_asignacion)
+        self.btn_asignacion = self.crear_boton(" Asignación", cmd_asignacion)
         self.btn_asignacion.pack(pady=3, padx=20, fill="x")
 
-        self.btn_1 = self.crear_boton("  Login en Wizard", cmd_login)
-        self.btn_1.pack(pady=3, padx=20, fill="x")
-
-        self.btn_2 = self.crear_boton("  Cierre Folio Wizard", cmd_wizard)
-        self.btn_2.pack(pady=3, padx=20, fill="x")
-
-        self.btn_3 = self.crear_boton("  Adjuntar Informe SUGO", cmd_sugo)
-        self.btn_3.pack(pady=3, padx=20, fill="x")
+        self.btn_cierre_oficio = self.crear_boton("  Cierre Oficio", cmd_cierre_oficio)
+        self.btn_cierre_oficio.pack(pady=3, padx=20, fill="x")
 
         self.btn_exit = self.crear_boton_con_imagen("Salir", icon_off, cmd_exit, white=True)
         self.btn_exit.pack(pady=(5, 3), padx=20, fill="x")
@@ -236,10 +230,8 @@ class PanelControls(ctk.CTkFrame):
 
     def bloquear_ui(self, bloquear):
         estado = "disabled" if bloquear else "normal"
-        self.btn_1.configure(state=estado)
-        self.btn_2.configure(state=estado)
         self.btn_asignacion.configure(state=estado)
-        self.btn_3.configure(state=estado)
+        self.btn_cierre_oficio.configure(state=estado)
         self.btn_exit.configure(state=estado)
         self.switch_headless.configure(state=estado)
         self.btn_browse_folder.configure(state=estado)
