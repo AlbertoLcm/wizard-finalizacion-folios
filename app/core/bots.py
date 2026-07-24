@@ -614,6 +614,7 @@ async def orchestrator(
                     data_folio = row.to_dict()
 
                     folio_sugo = data_folio.get("Folio Sugo", "")
+                    tipo_respuesta = str(data_folio.get("Tipo Respuesta")).strip().lower()
 
                     _log(f"\n[{i}/{total_pending}] => {folio_sugo}:")
 
@@ -624,37 +625,50 @@ async def orchestrator(
                             status_wizard = data_folio.get("Estatus Wizard")
                             status_sugo = data_folio.get("Estatus Informe")
 
-                            # Proceso WIZARD
-                            df.at[idx, "Estatus Wizard"] = "Procesando"
-                            if status_callback:
-                                status_callback(idx, "Procesando")
-
+                            # PROCESO WIZARD
                             if status_wizard != "ok":
+                                df.at[idx, "Estatus Wizard"] = "Procesando"
+                                if status_callback:
+                                    status_callback(idx, "Procesando")
+
                                 await page_wizard.bring_to_front()
                                 resultados_wizard = await wizard_finalizacion(data_folio, page_wizard)
                                 _log(f"     → WIZARD: {resultados_wizard['status']} - {resultados_wizard['message']}")
-                                df.loc[idx, "Estatus Wizard"] = resultados_wizard["status"]
+                                
+                                df.at[idx, "Estatus Wizard"] = resultados_wizard["status"]
                                 if status_callback:
                                     status_callback(idx, resultados_wizard['status'])
 
                                 if resultados_wizard['status'] != "ok":
                                     continue
 
-                            # Tiempo de espera para permitir actualizar el FOLIO
-                            await asyncio.sleep(2)
+                            if "neg" in tipo_respuesta:
+                                _log(f"     → INFORME: Oficio Negativa - Omitiendo Informe")
+                                df.at[idx, "Estatus Informe"] = "ok"
+                                if status_callback:
+                                    status_callback(idx, "ok")
+                                continue
 
-                            # Proceso SUGO INFORME
-                            df.at[idx, "Estatus Informe"] = "Procesando"
-                            if status_callback:
-                                status_callback(idx, "Procesando")
-
+                            # PROCESO SUGO INFORME
                             if status_sugo != "ok":
+                                await asyncio.sleep(2)
+
+                                df.at[idx, "Estatus Informe"] = "Procesando"
+                                if status_callback:
+                                    status_callback(idx, "Procesando")
+
                                 await page_sugo.bring_to_front()
                                 resultados_informe = await sugo_cierre_operaciones_asig_juridico(data_folio, page_sugo, informes_dir)
                                 _log(f"     → INFORME: {resultados_informe['status']} - {resultados_informe['message']}")
-                                df.loc[idx, "Estatus Informe"] = resultados_informe["status"]
+                                
+                                df.at[idx, "Estatus Informe"] = resultados_informe["status"]
                                 if status_callback:
                                     status_callback(idx, resultados_informe["status"])
+                            else:
+                                _log(f"     → INFORME: SUGO ya en OK - Omitiendo Cierre")
+                                df.at[idx, "Estatus Informe"] = "ok"
+                                if status_callback:
+                                    status_callback(idx, "ok")
 
 
                         case "asignacion":
