@@ -20,6 +20,7 @@ class BotWizardApp(ctk.CTk):
         super().__init__()
 
         ctk.deactivate_automatic_dpi_awareness()
+        ctk.set_widget_scaling(1.0)
 
         self.img_bbva = ctk.CTkImage(
             Image.open(settings.ASSETS_DIR / "bbva-blue.png"),
