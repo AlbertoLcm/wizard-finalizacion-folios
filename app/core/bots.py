@@ -297,7 +297,7 @@ async def wizard_finalizacion(datos: dict, page: Page):
         await asyncio.sleep(1)
 
         await page.get_by_role("button", name="Finalizar tarea").click()
-        await asyncio.sleep(2)
+        await asyncio.sleep(6)
         
         return {
             "status": "ok",
@@ -639,6 +639,9 @@ async def orchestrator(
 
                                 if resultados_wizard['status'] != "ok":
                                     continue
+
+                            # Tiempo de espera para permitir actualizar el FOLIO
+                            await asyncio.sleep(2)
 
                             # Proceso SUGO INFORME
                             df.at[idx, "Estatus Informe"] = "Procesando"
